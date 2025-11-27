@@ -30,7 +30,7 @@ contract SplitFeeFactory {
     event ProtocolFeeRecipientChanged(address indexed prevFeeRecipient, address indexed newFeeRecipient);
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "Only owner can call this function");
+        require(msg.sender == owner, "SplitFeeFactory: Only owner can call this function");
         _;
     }
 
