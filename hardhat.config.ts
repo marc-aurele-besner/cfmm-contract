@@ -85,6 +85,9 @@ const config: HardhatUserConfig = {
     outDir: "types",
     target: "ethers-v6",
   },
+  mocha: {
+    require: ["./test/setup.ts"],
+  },
 };
 
 export default config;
