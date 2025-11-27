@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import { console } from "hardhat/console.sol";
+
 /**
  * @title SplitFeeCFMM
  * @author Marc-Aurèle Besner (marc-aurele-besner)
@@ -35,6 +37,7 @@ contract SplitFeeCFMM is ERC20, ReentrancyGuard {
     uint256 public constant TOTAL_FEE_BPS = 25;     // 0.25% Total fee (protocol + user)
     uint256 public constant PROTOCOL_FEE_BPS = 5;   // 0.05% Protocol fee
     uint256 public constant MINIMUM_LIQUIDITY = 10**3; // Minimum liquidity required to create a pair (1000 tokens)
+    uint256 public constant ACC_PRECISION = 1e36; 
     // Fee accumulated in the pool
     uint256 public accumulatedTokenAFeePerShare;
     uint256 public accumulatedTokenBFeePerShare;
@@ -84,18 +87,33 @@ contract SplitFeeCFMM is ERC20, ReentrancyGuard {
     }
 
     function swap(uint256 _amountAOut, uint256 _amountBOut, address _to) external nonReentrant {
+        require(_amountAOut > 0 || _amountBOut > 0, "SplitFeeCFMM: Insufficient output amount");
+        require(_amountAOut == 0 || _amountBOut == 0, "SplitFeeCFMM: Cannot swap both tokens");
+        
+        (uint256 amountAIn, uint256 amountBIn) = _swap(_amountAOut, _amountBOut, _to);
+        
+        emit Swap(msg.sender, amountAIn, amountBIn, _amountAOut, _amountBOut, _to);
+        _sync();
     }
 
     function addLiquidity(address _to) external nonReentrant {
+        _addLiquidity(_to);
     }
 
     function removeLiquidity(address _to) external nonReentrant {
+        uint256 liquidity = balanceOf(msg.sender);
+        require(liquidity > 0, "SplitFeeCFMM: Insufficient liquidity");
+        _removeExactLiquidity(liquidity, _to);
     }
 
-    function removeExactLiquidity(uint256 _amount,address _to) external nonReentrant {
+    function removeExactLiquidity(uint256 _amount, address _to) external nonReentrant {
+        require(_amount > 0, "SplitFeeCFMM: Insufficient liquidity");
+        require(balanceOf(msg.sender) >= _amount, "SplitFeeCFMM: Insufficient balance");
+        _removeExactLiquidity(_amount, _to);
     }
 
     function claimFees() external {
+        _claimFees();
     }
 
     function getReserves() external view returns (uint256, uint256) {
@@ -103,6 +121,30 @@ contract SplitFeeCFMM is ERC20, ReentrancyGuard {
     }
 
     function getAmountOut(address _tokenIn, uint256 _amountIn) external view returns (uint256) {
+        require(_amountIn > 0, "SplitFeeCFMM: Insufficient input amount");
+        require(_tokenIn == tokenA || _tokenIn == tokenB, "SplitFeeCFMM: Invalid token");
+        
+        uint256 reserveIn;
+        uint256 reserveOut;
+        
+        if (_tokenIn == tokenA) {
+            reserveIn = reserveA;
+            reserveOut = reserveB;
+        } else {
+            reserveIn = reserveB;
+            reserveOut = reserveA;
+        }
+        
+        // Apply fee: amountIn * (10000 - TOTAL_FEE_BPS) / 10000
+        uint256 amountInWithFee = _amountIn * (10000 - TOTAL_FEE_BPS) / 10000;
+        
+        // Constant product formula: (reserveIn + amountInWithFee) * (reserveOut - amountOut) = reserveIn * reserveOut
+        // Solving for amountOut: amountOut = (reserveOut * amountInWithFee) / (reserveIn + amountInWithFee)
+        uint256 numerator = reserveOut * amountInWithFee;
+        uint256 denominator = reserveIn + amountInWithFee;
+        uint256 amountOut = numerator / denominator;
+        
+        return amountOut;
     }
 
     function getProtocolFeeRecipient() external view returns (address) {
@@ -130,19 +172,269 @@ contract SplitFeeCFMM is ERC20, ReentrancyGuard {
     }
 
     // Internal functions
-    function _swap(uint256 _amountAOut, uint256 _amountBOut, address _to) internal {
+    
+    /**
+     * @dev Safely calculates reward = (userLiquidity * accumulatedFeePerShare) / ACC_PRECISION
+     * Handles overflow by using alternative calculation method that preserves precision
+     * @param userLiquidity The user's LP token balance
+     * @param accumulatedFeePerShare The accumulated fee per share
+     * @return reward The calculated reward amount
+     */
+    function _safeCalculateReward(
+        uint256 userLiquidity,
+        uint256 accumulatedFeePerShare
+    ) internal pure returns (uint256 reward) {
+        if (userLiquidity == 0 || accumulatedFeePerShare == 0) {
+            return 0;
+        }
+        
+        // Check if multiplication would overflow
+        if (accumulatedFeePerShare <= type(uint256).max / userLiquidity) {
+            reward = (userLiquidity * accumulatedFeePerShare) / ACC_PRECISION;
+        } else {
+            // Overflow would occur - calculate using scaled arithmetic to preserve precision
+            // Split: (userLiquidity * accumulatedFeePerShare) / ACC_PRECISION
+            // into: userLiquidity * (accumulatedFeePerShare / ACC_PRECISION) + remainder handling
+            reward = userLiquidity * (accumulatedFeePerShare / ACC_PRECISION) + 
+                     (userLiquidity * (accumulatedFeePerShare % ACC_PRECISION)) / ACC_PRECISION;
+        }
+    }
+    
+    /**
+     * @dev Claims pending fees for a user
+     * @param user The user info storage reference
+     * @param userLiquidity The user's LP token balance
+     * @param to The address to transfer fees to
+     */
+    function _claimPendingFees(UserInfo storage user, uint256 userLiquidity, address to) internal {
+        if (userLiquidity == 0) return;
+        
+        uint256 totalRewardA = _safeCalculateReward(userLiquidity, accumulatedTokenAFeePerShare);
+        uint256 totalRewardB = _safeCalculateReward(userLiquidity, accumulatedTokenBFeePerShare);
+        uint256 pendingA = totalRewardA > user.rewardDebtA ? totalRewardA - user.rewardDebtA : 0;
+        uint256 pendingB = totalRewardB > user.rewardDebtB ? totalRewardB - user.rewardDebtB : 0;
+        
+        if (pendingA > 0) {
+            IERC20(tokenA).transfer(to, pendingA);
+        }
+        if (pendingB > 0) {
+            IERC20(tokenB).transfer(to, pendingB);
+        }
+        if (pendingA > 0 || pendingB > 0) {
+            emit FeesClaimed(to, pendingA, pendingB);
+        }
+    }
+    
+    function _swap(
+        uint256 _amountAOut, 
+        uint256 _amountBOut, 
+        address _to
+    ) internal returns (uint256 amountAIn, uint256 amountBIn) {
+        require(_to != tokenA && _to != tokenB, "SplitFeeCFMM: Invalid recipient");
+        
+        uint256 _reserveA = reserveA;
+        uint256 _reserveB = reserveB;
+        
+        if (_amountAOut > 0) {
+            // Swapping tokenA for tokenB
+            require(_amountAOut < _reserveA, "SplitFeeCFMM: Insufficient reserveA");
+            
+            // Calculate required input using constant product formula
+            uint256 numerator = _reserveA * _reserveB;
+            uint256 denominator = _reserveA - _amountAOut;
+            uint256 amountBInWithFee = (numerator / denominator) - _reserveB;
+            
+            // amountBIn (without fee): amountBIn = amountBInWithFee * (10000 - TOTAL_FEE_BPS)) / 10000
+            amountBIn = (amountBInWithFee * (10000 - TOTAL_FEE_BPS)) / 10000;
+            
+            require(amountBIn > 0, "SplitFeeCFMM: Insufficient input amount");
+            
+            // Transfer tokens
+            IERC20(tokenB).transferFrom(msg.sender, address(this), amountBIn);
+            IERC20(tokenA).transfer(_to, _amountAOut);
+            
+            // Calculate fees
+            uint256 protocolFee = (amountBIn * PROTOCOL_FEE_BPS) / 10000;
+            uint256 userFee = amountBInWithFee - protocolFee - amountBIn;
+            
+            // Transfer protocol fee
+            if (protocolFee > 0) {
+                IERC20(tokenB).transfer(protocolFeeRecipient, protocolFee);
+            }
+            
+            // Update reserves
+            reserveA = _reserveA - _amountAOut;
+            reserveB = _reserveB + amountBIn;
+            
+            // Accumulate user fees
+            uint256 totalSupply = totalSupply();
+            if (totalSupply > 0 && userFee > 0) {
+                accumulatedTokenBFeePerShare += (userFee * ACC_PRECISION) / totalSupply;
+            }
+        } else {
+            // Swapping tokenB for tokenA
+            require(_amountBOut < _reserveB, "SplitFeeCFMM: Insufficient reserveB");
+            
+            // Calculate required input using constant product formula
+            uint256 numerator = _reserveA * _reserveB;
+            uint256 denominator = _reserveB - _amountBOut;
+            uint256 amountAInWithFee = (numerator / denominator) - _reserveA;
+
+            // Apply fee: amountAIn = amountAInWithFee (10000 - TOTAL_FEE_BPS)) / 10000;
+            amountAIn = (amountAInWithFee * (10000 - TOTAL_FEE_BPS)) / 10000;
+            
+            require(amountAIn > 0, "SplitFeeCFMM: Insufficient input amount");
+            
+            // Transfer tokens
+            IERC20(tokenA).transferFrom(msg.sender, address(this), amountAIn);
+            IERC20(tokenB).transfer(_to, _amountBOut);
+            
+            // Calculate fees
+            uint256 protocolFee = (amountAIn * PROTOCOL_FEE_BPS) / 10000;
+            uint256 userFee = amountAInWithFee - protocolFee - amountAIn;
+            
+            // Transfer protocol fee
+            if (protocolFee > 0) {
+                IERC20(tokenA).transfer(protocolFeeRecipient, protocolFee);
+            }
+            
+            // Update reserves
+            reserveA = _reserveA + amountAIn;
+            reserveB = _reserveB - _amountBOut;
+            
+            // Accumulate user fees
+            uint256 totalSupply = totalSupply();
+            if (totalSupply > 0 && userFee > 0) {
+                accumulatedTokenAFeePerShare += (userFee * ACC_PRECISION) / totalSupply;
+            }
+        }
     }
 
     function _addLiquidity(address _to) internal {
+        uint256 _reserveA = reserveA;
+        uint256 _reserveB = reserveB;
+        
+        // Get current balances (user must transfer tokens first)
+        uint256 balanceA = IERC20(tokenA).balanceOf(address(this));
+        uint256 balanceB = IERC20(tokenB).balanceOf(address(this));
+        
+        uint256 amountA = balanceA - _reserveA;
+        uint256 amountB = balanceB - _reserveB;
+        
+        require(amountA > 0 && amountB > 0, "SplitFeeCFMM: Insufficient amounts");
+        
+        uint256 totalSupply = totalSupply();
+        uint256 liquidity;
+        
+        if (totalSupply == 0) {
+            // First liquidity provision
+            liquidity = amountA * amountB;
+            require(liquidity >= MINIMUM_LIQUIDITY, "SplitFeeCFMM: Insufficient liquidity minted");
+            liquidity -= MINIMUM_LIQUIDITY;
+            _mint(address(0), MINIMUM_LIQUIDITY); // Lock minimum liquidity
+        } else {
+            // Calculate liquidity based on proportional deposit
+            uint256 liquidityA = (amountA * totalSupply) / _reserveA;
+            uint256 liquidityB = (amountB * totalSupply) / _reserveB;
+            liquidity = liquidityA < liquidityB ? liquidityA : liquidityB;
+        }
+        
+        require(liquidity > 0, "SplitFeeCFMM: Insufficient liquidity minted");
+        
+        // Update user info for fee tracking
+        UserInfo storage user = userInfo[_to];
+        uint256 userLiquidity = balanceOf(_to);
+        
+        // Claim pending fees before updating
+        _claimPendingFees(user, userLiquidity, _to);
+        
+        // Mint LP tokens
+        _mint(_to, liquidity);
+        
+        // Update user reward debt
+        userLiquidity = balanceOf(_to);
+        user.rewardDebtA = _safeCalculateReward(userLiquidity, accumulatedTokenAFeePerShare);
+        user.rewardDebtB = _safeCalculateReward(userLiquidity, accumulatedTokenBFeePerShare);
+        
+        // Update reserves
+        reserveA = balanceA;
+        reserveB = balanceB;
+        
+        emit Mint(msg.sender, amountA, amountB);
     }
 
     function _removeLiquidity(address _to) internal {
+        uint256 liquidity = balanceOf(msg.sender);
+        require(liquidity > 0, "SplitFeeCFMM: Insufficient liquidity");
+        _removeExactLiquidity(liquidity, _to);
     }
 
-    function _removeExactLiquidity(uint256 _amount,address _to) internal {
+    function _removeExactLiquidity(uint256 _amount, address _to) internal {
+        require(_amount > 0, "SplitFeeCFMM: Insufficient liquidity");
+        
+        uint256 _reserveA = reserveA;
+        uint256 _reserveB = reserveB;
+        uint256 totalSupply = totalSupply();
+        
+        // Calculate amounts to return proportionally
+        uint256 amountA = (_amount * _reserveA) / totalSupply;
+        uint256 amountB = (_amount * _reserveB) / totalSupply;
+        
+        require(amountA > 0 && amountB > 0, "SplitFeeCFMM: Insufficient liquidity burned");
+        
+        // Update user info for fee tracking
+        UserInfo storage user = userInfo[msg.sender];
+        uint256 userLiquidity = balanceOf(msg.sender);
+        
+        // Claim pending fees before removing liquidity
+        _claimPendingFees(user, userLiquidity, msg.sender);
+        
+        // Burn LP tokens
+        _burn(msg.sender, _amount);
+        
+        // Update user reward debt
+        uint256 newBalance = balanceOf(msg.sender);
+        user.rewardDebtA = _safeCalculateReward(newBalance, accumulatedTokenAFeePerShare);
+        user.rewardDebtB = _safeCalculateReward(newBalance, accumulatedTokenBFeePerShare);
+        
+        // Transfer tokens to user
+        IERC20(tokenA).transfer(_to, amountA);
+        IERC20(tokenB).transfer(_to, amountB);
+        
+        // Update reserves
+        reserveA = _reserveA - amountA;
+        reserveB = _reserveB - amountB;
+        
+        emit Burn(msg.sender, amountA, amountB, _to);
     }
 
     function _claimFees() internal {
+        UserInfo storage user = userInfo[msg.sender];
+        uint256 userLiquidity = balanceOf(msg.sender);
+        
+        require(userLiquidity > 0, "SplitFeeCFMM: No liquidity to claim fees from");
+        
+        // Calculate pending fees
+        uint256 totalRewardA = _safeCalculateReward(userLiquidity, accumulatedTokenAFeePerShare);
+        uint256 totalRewardB = _safeCalculateReward(userLiquidity, accumulatedTokenBFeePerShare);
+        uint256 pendingA = totalRewardA > user.rewardDebtA ? totalRewardA - user.rewardDebtA : 0;
+        uint256 pendingB = totalRewardB > user.rewardDebtB ? totalRewardB - user.rewardDebtB : 0;
+        
+        require(pendingA > 0 || pendingB > 0, "SplitFeeCFMM: No fees to claim");
+        
+        // Update reward debt
+        user.rewardDebtA = totalRewardA;
+        user.rewardDebtB = totalRewardB;
+        
+        // Transfer fees
+        if (pendingA > 0) {
+            IERC20(tokenA).transfer(msg.sender, pendingA);
+        }
+        if (pendingB > 0) {
+            IERC20(tokenB).transfer(msg.sender, pendingB);
+        }
+        
+        emit FeesClaimed(msg.sender, pendingA, pendingB);
     }
 
     function _sync() internal {
