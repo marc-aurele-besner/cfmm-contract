@@ -3,6 +3,7 @@ import { ethers, fhevm } from "hardhat";
 import { expect } from "chai";
 import { getFHESigners, type FHESigners } from "./helpers/fheFixtures";
 import { deployFHEComplexFixture, type FHEComplexFixture } from "./helpers/fheComplexFixtures";
+import { createEncryptedSwapParams } from "./helpers/fheRouterFixtures";
 
 describe("FHE Complex Scenarios - Arbitrage", function () {
   let fixture: FHEComplexFixture;
@@ -52,18 +53,24 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
       const pairBCAddress = await fixture.pairBC.getAddress();
       const pairCAAddress = await fixture.pairAC.getAddress();
 
-      const encryptedSwapAmount1 = await fhevm
-        .createEncryptedInput(pairABAddress, routerAddress)
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
-      const encryptedSwapAmount2 = await fhevm
-        .createEncryptedInput(pairBCAddress, routerAddress)
-        .add32(Number(amounts1[1] / ethers.parseEther("1")))
-        .encrypt();
-      const encryptedSwapAmount3 = await fhevm
-        .createEncryptedInput(pairCAAddress, routerAddress)
-        .add32(Number(amounts2[1] / ethers.parseEther("1")))
-        .encrypt();
+      const swapParams1 = await createEncryptedSwapParams(
+        pairABAddress,
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
+      const swapParams2 = await createEncryptedSwapParams(
+        pairBCAddress,
+        routerAddress,
+        0,
+        Number(amounts1[1] / ethers.parseEther("1"))
+      );
+      const swapParams3 = await createEncryptedSwapParams(
+        pairCAAddress,
+        routerAddress,
+        Number(amounts2[1] / ethers.parseEther("1")),
+        0
+      );
 
       // Execute triangular arbitrage
       await fixture.router
@@ -72,8 +79,7 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
           amountIn,
           0n,
           path1,
-          [encryptedSwapAmount1.handles[0]],
-          [encryptedSwapAmount1.inputProof],
+          [swapParams1],
           signers.alice.address,
           deadline,
         );
@@ -84,8 +90,7 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
           amounts1[1],
           0n,
           path2,
-          [encryptedSwapAmount2.handles[0]],
-          [encryptedSwapAmount2.inputProof],
+          [swapParams2],
           signers.alice.address,
           deadline,
         );
@@ -96,8 +101,7 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
           amounts2[1],
           0n,
           path3,
-          [encryptedSwapAmount3.handles[0]],
-          [encryptedSwapAmount3.inputProof],
+          [swapParams3],
           signers.alice.address,
           deadline,
         );
@@ -130,18 +134,24 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
     const routerAddress = await fixture.router.getAddress();
     const amounts = await fixture.router.getAmountsOut(amountIn, path);
 
-    const encryptedSwapAmount1 = await fhevm
-      .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-      .add32(Number(amountIn / ethers.parseEther("1")))
-      .encrypt();
-    const encryptedSwapAmount2 = await fhevm
-      .createEncryptedInput(await fixture.pairBC.getAddress(), routerAddress)
-      .add32(Number(amounts[1] / ethers.parseEther("1")))
-      .encrypt();
-    const encryptedSwapAmount3 = await fhevm
-      .createEncryptedInput(await fixture.pairCD.getAddress(), routerAddress)
-      .add32(Number(amounts[2] / ethers.parseEther("1")))
-      .encrypt();
+    const swapParams1 = await createEncryptedSwapParams(
+      await fixture.pairAB.getAddress(),
+      routerAddress,
+      Number(amountIn / ethers.parseEther("1")),
+      0
+    );
+    const swapParams2 = await createEncryptedSwapParams(
+      await fixture.pairBC.getAddress(),
+      routerAddress,
+      0,
+      Number(amounts[1] / ethers.parseEther("1"))
+    );
+    const swapParams3 = await createEncryptedSwapParams(
+      await fixture.pairCD.getAddress(),
+      routerAddress,
+      0,
+      Number(amounts[2] / ethers.parseEther("1"))
+    );
 
     await fixture.router
       .connect(signers.alice)
@@ -149,13 +159,22 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
         amountIn,
         0n,
         path,
-        [encryptedSwapAmount1.handles[0], encryptedSwapAmount2.handles[0], encryptedSwapAmount3.handles[0]],
-        [encryptedSwapAmount1.inputProof, encryptedSwapAmount2.inputProof, encryptedSwapAmount3.inputProof],
+        [swapParams1, swapParams2, swapParams3],
         signers.alice.address,
         deadline,
       );
 
     // Add liquidity after swap
+    const pairBCAddress = await fixture.pairBC.getAddress();
+    const encryptedAmountB = await fhevm
+      .createEncryptedInput(pairBCAddress, routerAddress)
+      .add64(Number(ethers.parseEther("50000") / ethers.parseEther("1")))
+      .encrypt();
+    const encryptedAmountC = await fhevm
+      .createEncryptedInput(pairBCAddress, routerAddress)
+      .add64(Number(ethers.parseEther("100000") / ethers.parseEther("1")))
+      .encrypt();
+    
     const liquidityTx = fixture.router
       .connect(signers.bob)
       .addLiquidity(
@@ -165,6 +184,12 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
         ethers.parseEther("100000"),
         0n,
         0n,
+        {
+          encryptedAmountA: encryptedAmountB.handles[0],
+          encryptedAmountB: encryptedAmountC.handles[0],
+          amountAProof: encryptedAmountB.inputProof,
+          amountBProof: encryptedAmountC.inputProof,
+        },
         signers.bob.address,
         deadline,
       );
@@ -217,22 +242,30 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
     if (amounts[4] > amountIn) {
       // Create encrypted inputs for 4 hops using router address
       const routerAddress = await fixture.router.getAddress();
-      const encryptedSwapAmount1 = await fhevm
-        .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
-      const encryptedSwapAmount2 = await fhevm
-        .createEncryptedInput(await fixture.pairBC.getAddress(), routerAddress)
-        .add32(Number(amounts[1] / ethers.parseEther("1")))
-        .encrypt();
-      const encryptedSwapAmount3 = await fhevm
-        .createEncryptedInput(await fixture.pairCD.getAddress(), routerAddress)
-        .add32(Number(amounts[2] / ethers.parseEther("1")))
-        .encrypt();
-      const encryptedSwapAmount4 = await fhevm
-        .createEncryptedInput(pairDAAddress, routerAddress)
-        .add32(Number(amounts[3] / ethers.parseEther("1")))
-        .encrypt();
+      const swapParams1 = await createEncryptedSwapParams(
+        await fixture.pairAB.getAddress(),
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
+      const swapParams2 = await createEncryptedSwapParams(
+        await fixture.pairBC.getAddress(),
+        routerAddress,
+        0,
+        Number(amounts[1] / ethers.parseEther("1"))
+      );
+      const swapParams3 = await createEncryptedSwapParams(
+        await fixture.pairCD.getAddress(),
+        routerAddress,
+        0,
+        Number(amounts[2] / ethers.parseEther("1"))
+      );
+      const swapParams4 = await createEncryptedSwapParams(
+        pairDAAddress,
+        routerAddress,
+        Number(amounts[3] / ethers.parseEther("1")),
+        0
+      );
 
       const balanceBefore = await fixture.tokenA.balanceOf(signers.alice.address);
       await fixture.router
@@ -241,18 +274,7 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
           amountIn,
           0n,
           path,
-          [
-            encryptedSwapAmount1.handles[0],
-            encryptedSwapAmount2.handles[0],
-            encryptedSwapAmount3.handles[0],
-            encryptedSwapAmount4.handles[0],
-          ],
-          [
-            encryptedSwapAmount1.inputProof,
-            encryptedSwapAmount2.inputProof,
-            encryptedSwapAmount3.inputProof,
-            encryptedSwapAmount4.inputProof,
-          ],
+          [swapParams1, swapParams2, swapParams3, swapParams4],
           signers.alice.address,
           deadline,
         );
@@ -288,10 +310,12 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
 
     if (betterPath.length === 2) {
       // Single hop path
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(await fixture.pairAC.getAddress(), routerAddress)
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
+      const swapParams = await createEncryptedSwapParams(
+        await fixture.pairAC.getAddress(),
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
 
       await fixture.router
         .connect(signers.alice)
@@ -299,21 +323,24 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
           amountIn,
           0n,
           betterPath,
-          [encryptedSwapAmount.handles[0]],
-          [encryptedSwapAmount.inputProof],
+          [swapParams],
           signers.alice.address,
           deadline,
         );
     } else {
       // Multi-hop path
-      const encryptedSwapAmount1 = await fhevm
-        .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
-      const encryptedSwapAmount2 = await fhevm
-        .createEncryptedInput(await fixture.pairBC.getAddress(), routerAddress)
-        .add32(Number(amounts2[1] / ethers.parseEther("1")))
-        .encrypt();
+      const swapParams1 = await createEncryptedSwapParams(
+        await fixture.pairAB.getAddress(),
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
+      const swapParams2 = await createEncryptedSwapParams(
+        await fixture.pairBC.getAddress(),
+        routerAddress,
+        0,
+        Number(amounts2[1] / ethers.parseEther("1"))
+      );
 
       await fixture.router
         .connect(signers.alice)
@@ -321,8 +348,7 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
           amountIn,
           0n,
           betterPath,
-          [encryptedSwapAmount1.handles[0], encryptedSwapAmount2.handles[0]],
-          [encryptedSwapAmount1.inputProof, encryptedSwapAmount2.inputProof],
+          [swapParams1, swapParams2],
           signers.alice.address,
           deadline,
         );
@@ -352,6 +378,18 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
       await fixture.tokenB.mint(signers.alice.address, balanceB);
       await fixture.tokenC.mint(signers.alice.address, balanceC);
 
+      // Encrypt amounts - use router address as signer since router calls pair.addLiquidity
+      const pairBCAddress = await fixture.pairBC.getAddress();
+      const routerAddress = await fixture.router.getAddress();
+      const encryptedAmountB = await fhevm
+        .createEncryptedInput(pairBCAddress, routerAddress)
+        .add64(Number(balanceB / ethers.parseEther("1")))
+        .encrypt();
+      const encryptedAmountC = await fhevm
+        .createEncryptedInput(pairBCAddress, routerAddress)
+        .add64(Number(balanceC / ethers.parseEther("1")))
+        .encrypt();
+
       await fixture.router
         .connect(signers.alice)
         .addLiquidity(
@@ -361,6 +399,12 @@ describe("FHE Complex Scenarios - Arbitrage", function () {
           balanceC,
           0n,
           0n,
+          {
+            encryptedAmountA: encryptedAmountB.handles[0],
+            encryptedAmountB: encryptedAmountC.handles[0],
+            amountAProof: encryptedAmountB.inputProof,
+            amountBProof: encryptedAmountC.inputProof,
+          },
           signers.alice.address,
           deadline,
         );

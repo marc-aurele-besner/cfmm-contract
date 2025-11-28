@@ -31,6 +31,18 @@ describe("FHEMarketRouter - Liquidity", function () {
       const amountBDesired = ethers.parseEther("2000");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
+      // Encrypt amounts - use router address as signer since router calls pair.addLiquidity
+      const pairAddress = await fixture.pairAB.getAddress();
+      const routerAddress = await fixture.router.getAddress();
+      const encryptedAmountA = await fhevm
+        .createEncryptedInput(pairAddress, routerAddress)
+        .add64(Number(amountADesired / ethers.parseEther("1")))
+        .encrypt();
+      const encryptedAmountB = await fhevm
+        .createEncryptedInput(pairAddress, routerAddress)
+        .add64(Number(amountBDesired / ethers.parseEther("1")))
+        .encrypt();
+
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
       await fixture.tokenB.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
 
@@ -45,6 +57,12 @@ describe("FHEMarketRouter - Liquidity", function () {
           amountBDesired,
           0n,
           0n,
+          {
+            encryptedAmountA: encryptedAmountA.handles[0],
+            encryptedAmountB: encryptedAmountB.handles[0],
+            amountAProof: encryptedAmountA.inputProof,
+            amountBProof: encryptedAmountB.inputProof,
+          },
           signers.alice.address,
           deadline
         );
@@ -60,6 +78,18 @@ describe("FHEMarketRouter - Liquidity", function () {
       const amountA = ethers.parseEther("5000");
       const amountB = amountA * ratio;
 
+      // Encrypt amounts - use router address as signer since router calls pair.addLiquidity
+      const pairAddress = await fixture.pairAB.getAddress();
+      const routerAddress = await fixture.router.getAddress();
+      const encryptedAmountA = await fhevm
+        .createEncryptedInput(pairAddress, routerAddress)
+        .add64(Number(amountA / ethers.parseEther("1")))
+        .encrypt();
+      const encryptedAmountB = await fhevm
+        .createEncryptedInput(pairAddress, routerAddress)
+        .add64(Number(amountB / ethers.parseEther("1")))
+        .encrypt();
+
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
       await fixture.tokenB.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
 
@@ -73,6 +103,12 @@ describe("FHEMarketRouter - Liquidity", function () {
           amountB,
           0n,
           0n,
+          {
+            encryptedAmountA: encryptedAmountA.handles[0],
+            encryptedAmountB: encryptedAmountB.handles[0],
+            amountAProof: encryptedAmountA.inputProof,
+            amountBProof: encryptedAmountB.inputProof,
+          },
           signers.alice.address,
           deadline
         );
@@ -85,11 +121,23 @@ describe("FHEMarketRouter - Liquidity", function () {
       const [reserveA, reserveB] = await fixture.pairAB.getReserves();
       const amountA = ethers.parseEther("1000");
 
+      // Encrypt amounts - use router address as signer since router calls pair.addLiquidity
+      const pairAddress = await fixture.pairAB.getAddress();
+      const routerAddress = await fixture.router.getAddress();
+      const expectedAmountB = (amountA * reserveB) / reserveA;
+      const encryptedAmountA = await fhevm
+        .createEncryptedInput(pairAddress, routerAddress)
+        .add64(Number(amountA / ethers.parseEther("1")))
+        .encrypt();
+      const encryptedAmountB = await fhevm
+        .createEncryptedInput(pairAddress, routerAddress)
+        .add64(Number((expectedAmountB * 2n) / ethers.parseEther("1")))
+        .encrypt();
+
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
       await fixture.tokenB.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
 
       const deadline = Math.floor(Date.now() / 1000) + 3600;
-      const expectedAmountB = (amountA * reserveB) / reserveA;
 
       await fixture.router
         .connect(signers.alice)
@@ -100,6 +148,12 @@ describe("FHEMarketRouter - Liquidity", function () {
           expectedAmountB * 2n,
           amountA,
           expectedAmountB,
+          {
+            encryptedAmountA: encryptedAmountA.handles[0],
+            encryptedAmountB: encryptedAmountB.handles[0],
+            amountAProof: encryptedAmountA.inputProof,
+            amountBProof: encryptedAmountB.inputProof,
+          },
           signers.alice.address,
           deadline
         );
@@ -113,6 +167,21 @@ describe("FHEMarketRouter - Liquidity", function () {
     beforeEach(async function () {
       // Add liquidity first
       const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const amountA = ethers.parseEther("1000");
+      const amountB = ethers.parseEther("2000");
+      
+      // Encrypt amounts - use router address as signer since router calls pair.addLiquidity
+      const pairAddress = await fixture.pairAB.getAddress();
+      const routerAddress = await fixture.router.getAddress();
+      const encryptedAmountA = await fhevm
+        .createEncryptedInput(pairAddress, routerAddress)
+        .add64(Number(amountA / ethers.parseEther("1")))
+        .encrypt();
+      const encryptedAmountB = await fhevm
+        .createEncryptedInput(pairAddress, routerAddress)
+        .add64(Number(amountB / ethers.parseEther("1")))
+        .encrypt();
+      
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
       await fixture.tokenB.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
       await fixture.pairAB.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
@@ -122,10 +191,16 @@ describe("FHEMarketRouter - Liquidity", function () {
         .addLiquidity(
           await fixture.tokenA.getAddress(),
           await fixture.tokenB.getAddress(),
-          ethers.parseEther("1000"),
-          ethers.parseEther("2000"),
+          amountA,
+          amountB,
           0n,
           0n,
+          {
+            encryptedAmountA: encryptedAmountA.handles[0],
+            encryptedAmountB: encryptedAmountB.handles[0],
+            amountAProof: encryptedAmountA.inputProof,
+            amountBProof: encryptedAmountB.inputProof,
+          },
           signers.alice.address,
           deadline
         );
@@ -183,6 +258,18 @@ describe("FHEMarketRouter - Liquidity", function () {
       const amountADesired = ethers.parseEther("1000");
       const amountBDesired = ethers.parseEther("2000");
 
+      // Encrypt amounts - use router address as signer since router calls pair.addLiquidity
+      const pairAddress = await fixture.pairAB.getAddress();
+      const routerAddress = await fixture.router.getAddress();
+      const encryptedAmountA = await fhevm
+        .createEncryptedInput(pairAddress, routerAddress)
+        .add64(Number(amountADesired / ethers.parseEther("1")))
+        .encrypt();
+      const encryptedAmountB = await fhevm
+        .createEncryptedInput(pairAddress, routerAddress)
+        .add64(Number(amountBDesired / ethers.parseEther("1")))
+        .encrypt();
+
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
       await fixture.tokenB.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
 
@@ -197,6 +284,12 @@ describe("FHEMarketRouter - Liquidity", function () {
           amountBDesired,
           amountADesired - ethers.parseEther("100"),
           amountBDesired - ethers.parseEther("200"),
+          {
+            encryptedAmountA: encryptedAmountA.handles[0],
+            encryptedAmountB: encryptedAmountB.handles[0],
+            amountAProof: encryptedAmountA.inputProof,
+            amountBProof: encryptedAmountB.inputProof,
+          },
           signers.alice.address,
           deadline
         );
@@ -207,6 +300,21 @@ describe("FHEMarketRouter - Liquidity", function () {
 
     it("Should handle partial liquidity removal", async function () {
       const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const amountA = ethers.parseEther("1000");
+      const amountB = ethers.parseEther("2000");
+      
+      // Encrypt amounts - use router address as signer since router calls pair.addLiquidity
+      const pairAddress = await fixture.pairAB.getAddress();
+      const routerAddress = await fixture.router.getAddress();
+      const encryptedAmountA = await fhevm
+        .createEncryptedInput(pairAddress, routerAddress)
+        .add64(Number(amountA / ethers.parseEther("1")))
+        .encrypt();
+      const encryptedAmountB = await fhevm
+        .createEncryptedInput(pairAddress, routerAddress)
+        .add64(Number(amountB / ethers.parseEther("1")))
+        .encrypt();
+      
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
       await fixture.tokenB.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
       await fixture.pairAB.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
@@ -216,10 +324,16 @@ describe("FHEMarketRouter - Liquidity", function () {
         .addLiquidity(
           await fixture.tokenA.getAddress(),
           await fixture.tokenB.getAddress(),
-          ethers.parseEther("1000"),
-          ethers.parseEther("2000"),
+          amountA,
+          amountB,
           0n,
           0n,
+          {
+            encryptedAmountA: encryptedAmountA.handles[0],
+            encryptedAmountB: encryptedAmountB.handles[0],
+            amountAProof: encryptedAmountA.inputProof,
+            amountBProof: encryptedAmountB.inputProof,
+          },
           signers.alice.address,
           deadline
         );

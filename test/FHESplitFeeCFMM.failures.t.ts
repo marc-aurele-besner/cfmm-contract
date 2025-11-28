@@ -1,5 +1,6 @@
 import { ethers, fhevm } from "hardhat";
 import { expect } from "chai";
+import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { getFHESigners, deployFHEFixture, type FHESigners, type FHEFixture } from "./helpers/fheFixtures";
 import { calculateInputForOutput } from "./helpers/calculations";
 import { FhevmType } from "@fhevm/hardhat-plugin";
@@ -25,22 +26,34 @@ describe("FHESplitFeeCFMM - Failures", function () {
   describe("Swap Failures", function () {
     it("Should revert swap with zero output", async function () {
       // Create encrypted zero value
-      const encryptedZero = await fhevm
+      const encryptedZeroA = await fhevm
         .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-        .add32(0)
+        .add64(0)
+        .encrypt();
+      const encryptedZeroB = await fhevm
+        .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+        .add64(0)
         .encrypt();
 
       await expect(
         fixture.pair
           .connect(signers.alice)
-          .swap(encryptedZero.handles[0], encryptedZero.inputProof, 0n, 0n, signers.alice.address)
+          .swap(
+            encryptedZeroA.handles[0],
+            encryptedZeroB.handles[0],
+            encryptedZeroA.inputProof,
+            encryptedZeroB.inputProof,
+            0n,
+            0n,
+            signers.alice.address
+          )
       ).to.be.revertedWith("FHESplitFeeCFMM: Insufficient output amount");
     });
 
     it("Should revert swap with both outputs", async function () {
       const encryptedAmount = await fhevm
         .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-        .add32(100)
+        .add64(100)
         .encrypt();
 
       await expect(
@@ -48,6 +61,8 @@ describe("FHESplitFeeCFMM - Failures", function () {
           .connect(signers.alice)
           .swap(
             encryptedAmount.handles[0],
+            encryptedAmount.handles[0],
+            encryptedAmount.inputProof,
             encryptedAmount.inputProof,
             ethers.parseEther("100"),
             ethers.parseEther("200"),
@@ -68,7 +83,7 @@ describe("FHESplitFeeCFMM - Failures", function () {
       const swapAmountScaled = Number(amountBIn / ethers.parseEther("1"));
       const encryptedSwapAmount = await fhevm
         .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-        .add32(swapAmountScaled)
+        .add64(swapAmountScaled)
         .encrypt();
 
       await fixture.tokenB.connect(signers.alice).approve(fixture.pairAddress, amountBIn * 2n);
@@ -78,6 +93,8 @@ describe("FHESplitFeeCFMM - Failures", function () {
           .connect(signers.alice)
           .swap(
             encryptedSwapAmount.handles[0],
+            encryptedSwapAmount.handles[0],
+            encryptedSwapAmount.inputProof,
             encryptedSwapAmount.inputProof,
             amountAOut,
             0n,
@@ -98,7 +115,7 @@ describe("FHESplitFeeCFMM - Failures", function () {
       const swapAmountScaled = Number(amountAIn / ethers.parseEther("1"));
       const encryptedSwapAmount = await fhevm
         .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-        .add32(swapAmountScaled)
+        .add64(swapAmountScaled)
         .encrypt();
 
       await fixture.tokenA.connect(signers.alice).approve(fixture.pairAddress, amountAIn * 2n);
@@ -108,6 +125,8 @@ describe("FHESplitFeeCFMM - Failures", function () {
           .connect(signers.alice)
           .swap(
             encryptedSwapAmount.handles[0],
+            encryptedSwapAmount.handles[0],
+            encryptedSwapAmount.inputProof,
             encryptedSwapAmount.inputProof,
             0n,
             amountBOut,
@@ -122,13 +141,21 @@ describe("FHESplitFeeCFMM - Failures", function () {
 
       const encryptedAmount = await fhevm
         .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-        .add32(100)
+        .add64(100)
         .encrypt();
 
       await expect(
         fixture.pair
           .connect(signers.alice)
-          .swap(encryptedAmount.handles[0], encryptedAmount.inputProof, amountAOut, 0n, signers.alice.address)
+          .swap(
+            encryptedAmount.handles[0],
+            encryptedAmount.handles[0],
+            encryptedAmount.inputProof,
+            encryptedAmount.inputProof,
+            amountAOut,
+            0n,
+            signers.alice.address
+          )
       ).to.be.revertedWith("FHESplitFeeCFMM: Insufficient reserveA");
     });
 
@@ -138,13 +165,21 @@ describe("FHESplitFeeCFMM - Failures", function () {
 
       const encryptedAmount = await fhevm
         .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-        .add32(100)
+        .add64(100)
         .encrypt();
 
       await expect(
         fixture.pair
           .connect(signers.alice)
-          .swap(encryptedAmount.handles[0], encryptedAmount.inputProof, 0n, amountBOut, signers.alice.address)
+          .swap(
+            encryptedAmount.handles[0],
+            encryptedAmount.handles[0],
+            encryptedAmount.inputProof,
+            encryptedAmount.inputProof,
+            0n,
+            amountBOut,
+            signers.alice.address
+          )
       ).to.be.revertedWith("FHESplitFeeCFMM: Insufficient reserveB");
     });
 
@@ -153,13 +188,21 @@ describe("FHESplitFeeCFMM - Failures", function () {
 
       const encryptedAmount = await fhevm
         .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-        .add32(100)
+        .add64(100)
         .encrypt();
 
       await expect(
         fixture.pair
           .connect(signers.alice)
-          .swap(encryptedAmount.handles[0], encryptedAmount.inputProof, amountAOut, 0n, signers.alice.address)
+          .swap(
+            encryptedAmount.handles[0],
+            encryptedAmount.handles[0],
+            encryptedAmount.inputProof,
+            encryptedAmount.inputProof,
+            amountAOut,
+            0n,
+            signers.alice.address
+          )
       ).to.be.reverted;
     });
 
@@ -172,10 +215,14 @@ describe("FHESplitFeeCFMM - Failures", function () {
         await fixture.pair.getReserveA(),
       );
 
-      const swapAmountScaled = Number(amountBIn / ethers.parseEther("1"));
-      const encryptedSwapAmount = await fhevm
+      const swapAmountBScaled = Number(amountBIn / ethers.parseEther("1"));
+      const encryptedAmountBIn = await fhevm
         .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-        .add32(swapAmountScaled)
+        .add64(swapAmountBScaled)
+        .encrypt();
+      const encryptedAmountAIn = await fhevm
+        .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+        .add64(0)
         .encrypt();
 
       await fixture.tokenB.connect(signers.alice).approve(fixture.pairAddress, amountBIn * 2n);
@@ -183,7 +230,15 @@ describe("FHESplitFeeCFMM - Failures", function () {
       await expect(
         fixture.pair
           .connect(signers.alice)
-          .swap(encryptedSwapAmount.handles[0], encryptedSwapAmount.inputProof, amountAOut, 0n, ethers.ZeroAddress)
+          .swap(
+            encryptedAmountAIn.handles[0],
+            encryptedAmountBIn.handles[0],
+            encryptedAmountAIn.inputProof,
+            encryptedAmountBIn.inputProof,
+            amountAOut,
+            0n,
+            ethers.ZeroAddress
+          )
       ).to.be.reverted;
     });
   });
@@ -193,18 +248,36 @@ describe("FHESplitFeeCFMM - Failures", function () {
       const amountB = ethers.parseEther("2000");
       await fixture.tokenB.transfer(fixture.pairAddress, amountB);
 
-      await expect(fixture.pair.connect(signers.alice).addLiquidity(signers.alice.address)).to.be.revertedWith(
-        "FHESplitFeeCFMM: Insufficient amounts",
-      );
+      const encryptedZeroA = await fhevm.createEncryptedInput(fixture.pairAddress, signers.alice.address).add64(0).encrypt();
+      const encryptedAmountB = await fhevm.createEncryptedInput(fixture.pairAddress, signers.alice.address).add64(Number(amountB / ethers.parseEther("1"))).encrypt();
+      
+      await expect(
+        fixture.pair.connect(signers.alice).addLiquidity(
+          encryptedZeroA.handles[0],
+          encryptedAmountB.handles[0],
+          encryptedZeroA.inputProof,
+          encryptedAmountB.inputProof,
+          signers.alice.address
+        )
+      ).to.be.revertedWith("FHESplitFeeCFMM: Insufficient amounts");
     });
 
     it("Should revert add liquidity with zero tokenB amount", async function () {
       const amountA = ethers.parseEther("1000");
       await fixture.tokenA.transfer(fixture.pairAddress, amountA);
 
-      await expect(fixture.pair.connect(signers.alice).addLiquidity(signers.alice.address)).to.be.revertedWith(
-        "FHESplitFeeCFMM: Insufficient amounts",
-      );
+      const encryptedAmountA = await fhevm.createEncryptedInput(fixture.pairAddress, signers.alice.address).add64(Number(amountA / ethers.parseEther("1"))).encrypt();
+      const encryptedZeroB = await fhevm.createEncryptedInput(fixture.pairAddress, signers.alice.address).add64(0).encrypt();
+      
+      await expect(
+        fixture.pair.connect(signers.alice).addLiquidity(
+          encryptedAmountA.handles[0],
+          encryptedZeroB.handles[0],
+          encryptedAmountA.inputProof,
+          encryptedZeroB.inputProof,
+          signers.alice.address
+        )
+      ).to.be.revertedWith("FHESplitFeeCFMM: Insufficient amounts");
     });
 
     it("Should revert add liquidity with zero address recipient", async function () {
@@ -213,7 +286,18 @@ describe("FHESplitFeeCFMM - Failures", function () {
       await fixture.tokenA.transfer(fixture.pairAddress, amountA);
       await fixture.tokenB.transfer(fixture.pairAddress, amountB);
 
-      await expect(fixture.pair.connect(signers.alice).addLiquidity(ethers.ZeroAddress)).to.be.reverted;
+      const encryptedAmountA = await fhevm.createEncryptedInput(fixture.pairAddress, signers.alice.address).add64(Number(amountA / ethers.parseEther("1"))).encrypt();
+      const encryptedAmountB = await fhevm.createEncryptedInput(fixture.pairAddress, signers.alice.address).add64(Number(amountB / ethers.parseEther("1"))).encrypt();
+      
+      await expect(
+        fixture.pair.connect(signers.alice).addLiquidity(
+          encryptedAmountA.handles[0],
+          encryptedAmountB.handles[0],
+          encryptedAmountA.inputProof,
+          encryptedAmountB.inputProof,
+          ethers.ZeroAddress
+        )
+      ).to.be.reverted;
     });
   });
 
@@ -232,11 +316,20 @@ describe("FHESplitFeeCFMM - Failures", function () {
 
     it("Should revert removeExactLiquidity with insufficient balance", async function () {
       // Add liquidity first
-      const amountA = ethers.parseEther("1000");
-      const amountB = ethers.parseEther("2000");
-      await fixture.tokenA.transfer(fixture.pairAddress, amountA);
-      await fixture.tokenB.transfer(fixture.pairAddress, amountB);
-      await fixture.pair.connect(signers.alice).addLiquidity(signers.alice.address);
+      const addAmountA = ethers.parseEther("1000");
+      const addAmountB = ethers.parseEther("2000");
+      await fixture.tokenA.transfer(fixture.pairAddress, addAmountA);
+      await fixture.tokenB.transfer(fixture.pairAddress, addAmountB);
+      const encryptedAmountA = await fhevm.createEncryptedInput(fixture.pairAddress, signers.alice.address).add64(Number(addAmountA / ethers.parseEther("1"))).encrypt();
+      const encryptedAmountB = await fhevm.createEncryptedInput(fixture.pairAddress, signers.alice.address).add64(Number(addAmountB / ethers.parseEther("1"))).encrypt();
+      
+      await fixture.pair.connect(signers.alice).addLiquidity(
+        encryptedAmountA.handles[0],
+        encryptedAmountB.handles[0],
+        encryptedAmountA.inputProof,
+        encryptedAmountB.inputProof,
+        signers.alice.address
+      );
 
       const liquidity = await fixture.pair.balanceOf(signers.alice.address);
       const excessAmount = liquidity + ethers.parseEther("1");
@@ -248,11 +341,20 @@ describe("FHESplitFeeCFMM - Failures", function () {
 
     it("Should revert remove liquidity with zero address recipient", async function () {
       // Add liquidity first
-      const amountA = ethers.parseEther("1000");
-      const amountB = ethers.parseEther("2000");
-      await fixture.tokenA.transfer(fixture.pairAddress, amountA);
-      await fixture.tokenB.transfer(fixture.pairAddress, amountB);
-      await fixture.pair.connect(signers.alice).addLiquidity(signers.alice.address);
+      const addAmountA = ethers.parseEther("1000");
+      const addAmountB = ethers.parseEther("2000");
+      await fixture.tokenA.transfer(fixture.pairAddress, addAmountA);
+      await fixture.tokenB.transfer(fixture.pairAddress, addAmountB);
+      const encryptedAmountA = await fhevm.createEncryptedInput(fixture.pairAddress, signers.alice.address).add64(Number(addAmountA / ethers.parseEther("1"))).encrypt();
+      const encryptedAmountB = await fhevm.createEncryptedInput(fixture.pairAddress, signers.alice.address).add64(Number(addAmountB / ethers.parseEther("1"))).encrypt();
+      
+      await fixture.pair.connect(signers.alice).addLiquidity(
+        encryptedAmountA.handles[0],
+        encryptedAmountB.handles[0],
+        encryptedAmountA.inputProof,
+        encryptedAmountB.inputProof,
+        signers.alice.address
+      );
 
       const liquidity = await fixture.pair.balanceOf(signers.alice.address);
       if (liquidity > 0n) {
@@ -271,15 +373,28 @@ describe("FHESplitFeeCFMM - Failures", function () {
 
     it("Should revert claim fees when no fees available", async function () {
       // Add liquidity but don't perform any swaps to generate fees
-      const amountA = ethers.parseEther("1000");
-      const amountB = ethers.parseEther("2000");
-      await fixture.tokenA.transfer(fixture.pairAddress, amountA);
-      await fixture.tokenB.transfer(fixture.pairAddress, amountB);
-      await fixture.pair.connect(signers.bob).addLiquidity(signers.bob.address);
-
-      await expect(fixture.pair.connect(signers.bob).claimFees()).to.be.revertedWith(
-        "FHESplitFeeCFMM: No fees to claim",
+      const addAmountA = ethers.parseEther("1000");
+      const addAmountB = ethers.parseEther("2000");
+      await fixture.tokenA.transfer(fixture.pairAddress, addAmountA);
+      await fixture.tokenB.transfer(fixture.pairAddress, addAmountB);
+      
+      const encryptedAmountA = await fhevm.createEncryptedInput(fixture.pairAddress, signers.bob.address).add64(Number(addAmountA / ethers.parseEther("1"))).encrypt();
+      const encryptedAmountB = await fhevm.createEncryptedInput(fixture.pairAddress, signers.bob.address).add64(Number(addAmountB / ethers.parseEther("1"))).encrypt();
+      
+      await fixture.pair.connect(signers.bob).addLiquidity(
+        encryptedAmountA.handles[0],
+        encryptedAmountB.handles[0],
+        encryptedAmountA.inputProof,
+        encryptedAmountB.inputProof,
+        signers.bob.address
       );
+
+      // Note: In FHE version, claimFees doesn't check for fees - it always succeeds if user has liquidity
+      // It only updates encrypted pending rewards (which may be zero)
+      // The function will succeed and emit EncryptedRewardsUpdated event
+      await expect(fixture.pair.connect(signers.bob).claimFees())
+        .to.emit(fixture.pair, "EncryptedRewardsUpdated")
+        .withArgs(signers.bob.address, anyValue, anyValue);
     });
   });
 

@@ -25,13 +25,31 @@ describe("FHESplitFeeCFMM - Liquidity", function () {
       const amountA = ethers.parseEther("1000");
       const amountB = ethers.parseEther("2000");
 
+      // Encrypt amounts
+      const amountAScaled = Number(amountA / ethers.parseEther("1"));
+      const amountBScaled = Number(amountB / ethers.parseEther("1"));
+      const encryptedAmountA = await fhevm
+        .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+        .add64(amountAScaled)
+        .encrypt();
+      const encryptedAmountB = await fhevm
+        .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+        .add64(amountBScaled)
+        .encrypt();
+
       // Transfer tokens to pair
       await fixture.tokenA.transfer(fixture.pairAddress, amountA);
       await fixture.tokenB.transfer(fixture.pairAddress, amountB);
 
       const balanceBefore = await fixture.pair.balanceOf(signers.alice.address);
 
-      await fixture.pair.connect(signers.alice).addLiquidity(signers.alice.address);
+      await fixture.pair.connect(signers.alice).addLiquidity(
+        encryptedAmountA.handles[0],
+        encryptedAmountB.handles[0],
+        encryptedAmountA.inputProof,
+        encryptedAmountB.inputProof,
+        signers.alice.address
+      );
 
       const balanceAfter = await fixture.pair.balanceOf(signers.alice.address);
       expect(balanceAfter).to.be.gt(balanceBefore);
@@ -45,10 +63,30 @@ describe("FHESplitFeeCFMM - Liquidity", function () {
       const amountA = ethers.parseEther("1000");
       const amountB = ethers.parseEther("2000");
 
+      // Encrypt amounts
+      const amountAScaled = Number(amountA / ethers.parseEther("1"));
+      const amountBScaled = Number(amountB / ethers.parseEther("1"));
+      const encryptedAmountA = await fhevm
+        .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+        .add64(amountAScaled)
+        .encrypt();
+      const encryptedAmountB = await fhevm
+        .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+        .add64(amountBScaled)
+        .encrypt();
+
       await fixture.tokenA.transfer(fixture.pairAddress, amountA);
       await fixture.tokenB.transfer(fixture.pairAddress, amountB);
 
-      await expect(fixture.pair.connect(signers.alice).addLiquidity(signers.alice.address))
+      await expect(
+        fixture.pair.connect(signers.alice).addLiquidity(
+          encryptedAmountA.handles[0],
+          encryptedAmountB.handles[0],
+          encryptedAmountA.inputProof,
+          encryptedAmountB.inputProof,
+          signers.alice.address
+        )
+      )
         .to.emit(fixture.pair, "Mint")
         .withArgs(signers.alice.address, amountA, amountB);
     });
@@ -57,16 +95,48 @@ describe("FHESplitFeeCFMM - Liquidity", function () {
       const amountA1 = ethers.parseEther("1000");
       const amountB1 = ethers.parseEther("2000");
 
+      // Encrypt amounts for Alice
+      const encryptedAmountA1 = await fhevm
+        .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+        .add64(Number(amountA1 / ethers.parseEther("1")))
+        .encrypt();
+      const encryptedAmountB1 = await fhevm
+        .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+        .add64(Number(amountB1 / ethers.parseEther("1")))
+        .encrypt();
+
       await fixture.tokenA.transfer(fixture.pairAddress, amountA1);
       await fixture.tokenB.transfer(fixture.pairAddress, amountB1);
-      await fixture.pair.connect(signers.alice).addLiquidity(signers.alice.address);
+      await fixture.pair.connect(signers.alice).addLiquidity(
+        encryptedAmountA1.handles[0],
+        encryptedAmountB1.handles[0],
+        encryptedAmountA1.inputProof,
+        encryptedAmountB1.inputProof,
+        signers.alice.address
+      );
 
       const amountA2 = ethers.parseEther("500");
       const amountB2 = ethers.parseEther("1000");
 
+      // Encrypt amounts for Bob
+      const encryptedAmountA2 = await fhevm
+        .createEncryptedInput(fixture.pairAddress, signers.bob.address)
+        .add64(Number(amountA2 / ethers.parseEther("1")))
+        .encrypt();
+      const encryptedAmountB2 = await fhevm
+        .createEncryptedInput(fixture.pairAddress, signers.bob.address)
+        .add64(Number(amountB2 / ethers.parseEther("1")))
+        .encrypt();
+
       await fixture.tokenA.transfer(fixture.pairAddress, amountA2);
       await fixture.tokenB.transfer(fixture.pairAddress, amountB2);
-      await fixture.pair.connect(signers.bob).addLiquidity(signers.bob.address);
+      await fixture.pair.connect(signers.bob).addLiquidity(
+        encryptedAmountA2.handles[0],
+        encryptedAmountB2.handles[0],
+        encryptedAmountA2.inputProof,
+        encryptedAmountB2.inputProof,
+        signers.bob.address
+      );
 
       const aliceBalance = await fixture.pair.balanceOf(signers.alice.address);
       const bobBalance = await fixture.pair.balanceOf(signers.bob.address);
@@ -82,9 +152,25 @@ describe("FHESplitFeeCFMM - Liquidity", function () {
       const amountA = ethers.parseEther("1000");
       const amountB = ethers.parseEther("2000");
 
+      // Encrypt amounts
+      const encryptedAmountA = await fhevm
+        .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+        .add64(Number(amountA / ethers.parseEther("1")))
+        .encrypt();
+      const encryptedAmountB = await fhevm
+        .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+        .add64(Number(amountB / ethers.parseEther("1")))
+        .encrypt();
+
       await fixture.tokenA.transfer(fixture.pairAddress, amountA);
       await fixture.tokenB.transfer(fixture.pairAddress, amountB);
-      await fixture.pair.connect(signers.alice).addLiquidity(signers.alice.address);
+      await fixture.pair.connect(signers.alice).addLiquidity(
+        encryptedAmountA.handles[0],
+        encryptedAmountB.handles[0],
+        encryptedAmountA.inputProof,
+        encryptedAmountB.inputProof,
+        signers.alice.address
+      );
     });
 
     it("Should remove all liquidity", async function () {

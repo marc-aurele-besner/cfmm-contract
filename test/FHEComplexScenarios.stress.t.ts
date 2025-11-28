@@ -3,6 +3,8 @@ import { ethers, fhevm } from "hardhat";
 import { expect } from "chai";
 import { getFHESigners, type FHESigners } from "./helpers/fheFixtures";
 import { deployFHEComplexFixture, type FHEComplexFixture } from "./helpers/fheComplexFixtures";
+import { createEncryptedSwapParams } from "./helpers/fheRouterFixtures";
+import { createEncryptedSwapParams } from "./helpers/fheRouterFixtures";
 
 describe("FHE Complex Scenarios - Stress Tests", function () {
   let fixture: FHEComplexFixture;
@@ -37,7 +39,12 @@ describe("FHE Complex Scenarios - Stress Tests", function () {
     const routerAddress = await fixture.router.getAddress();
     const path = [await fixture.tokenA.getAddress(), await fixture.tokenB.getAddress()];
 
+    const pairABAddress = await fixture.pairAB.getAddress();
+    const routerAddressStress = await fixture.router.getAddress();
     for (let i = 0; i < 10; i++) {
+      const encryptedAmountA = await fhevm.createEncryptedInput(pairABAddress, routerAddressStress).add64(Number(ethers.parseEther("1000") / ethers.parseEther("1"))).encrypt();
+      const encryptedAmountB = await fhevm.createEncryptedInput(pairABAddress, routerAddressStress).add64(Number(ethers.parseEther("2000") / ethers.parseEther("1"))).encrypt();
+      
       await fixture.router
         .connect(signers.alice)
         .addLiquidity(
@@ -47,23 +54,30 @@ describe("FHE Complex Scenarios - Stress Tests", function () {
           ethers.parseEther("2000"),
           0n,
           0n,
+          {
+            encryptedAmountA: encryptedAmountA.handles[0],
+            encryptedAmountB: encryptedAmountB.handles[0],
+            amountAProof: encryptedAmountA.inputProof,
+            amountBProof: encryptedAmountB.inputProof,
+          },
           signers.alice.address,
           deadline,
         );
 
       // Create encrypted input for swap using router address
       const swapAmount = ethers.parseEther("500");
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-        .add32(Number(swapAmount / ethers.parseEther("1")))
-        .encrypt();
+      const swapParams = await createEncryptedSwapParams(
+        await fixture.pairAB.getAddress(),
+        routerAddress,
+        Number(swapAmount / ethers.parseEther("1")),
+        0
+      );
 
       await fixture.router.connect(signers.alice).swapExactTokensForTokens(
         swapAmount,
         0n,
         path,
-        [encryptedSwapAmount.handles[0]],
-        [encryptedSwapAmount.inputProof],
+        [swapParams],
         signers.alice.address,
         deadline,
       );
@@ -101,17 +115,18 @@ describe("FHE Complex Scenarios - Stress Tests", function () {
 
     // Create encrypted input for swap using router address
     const routerAddress = await fixture.router.getAddress();
-    const encryptedSwapAmount1 = await fhevm
-      .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-      .add32(Number(largeSwap / ethers.parseEther("1")))
-      .encrypt();
+    const swapParams1 = await createEncryptedSwapParams(
+      await fixture.pairAB.getAddress(),
+      routerAddress,
+      Number(largeSwap / ethers.parseEther("1")),
+      0
+    );
 
     await fixture.router.connect(signers.alice).swapExactTokensForTokens(
       largeSwap,
       0n,
       path,
-      [encryptedSwapAmount1.handles[0]],
-      [encryptedSwapAmount1.inputProof],
+      [swapParams1],
       signers.alice.address,
       deadline,
     );
@@ -125,17 +140,18 @@ describe("FHE Complex Scenarios - Stress Tests", function () {
 
     // Create encrypted input for reverse swap
     const swapAmountReverse = balanceB / 2n;
-    const encryptedSwapAmount2 = await fhevm
-      .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-      .add32(Number(swapAmountReverse / ethers.parseEther("1")))
-      .encrypt();
+    const swapParams2 = await createEncryptedSwapParams(
+      await fixture.pairAB.getAddress(),
+      routerAddress,
+      0,
+      Number(swapAmountReverse / ethers.parseEther("1"))
+    );
 
     await fixture.router.connect(signers.alice).swapExactTokensForTokens(
       swapAmountReverse,
       0n,
       reversePath,
-      [encryptedSwapAmount2.handles[0]],
-      [encryptedSwapAmount2.inputProof],
+      [swapParams2],
       signers.alice.address,
       deadline,
     );
@@ -165,29 +181,39 @@ describe("FHE Complex Scenarios - Stress Tests", function () {
     const routerAddress = await fixture.router.getAddress();
     const amounts = await fixture.router.getAmountsOut(amountIn, path);
     
-    const encryptedSwapAmount1 = await fhevm
-      .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-      .add32(Number(amountIn / ethers.parseEther("1")))
-      .encrypt();
-    const encryptedSwapAmount2 = await fhevm
-      .createEncryptedInput(await fixture.pairBC.getAddress(), routerAddress)
-      .add32(Number(amounts[1] / ethers.parseEther("1")))
-      .encrypt();
-    const encryptedSwapAmount3 = await fhevm
-      .createEncryptedInput(await fixture.pairCD.getAddress(), routerAddress)
-      .add32(Number(amounts[2] / ethers.parseEther("1")))
-      .encrypt();
+    const swapParams1 = await createEncryptedSwapParams(
+      await fixture.pairAB.getAddress(),
+      routerAddress,
+      Number(amountIn / ethers.parseEther("1")),
+      0
+    );
+    const swapParams2 = await createEncryptedSwapParams(
+      await fixture.pairBC.getAddress(),
+      routerAddress,
+      0,
+      Number(amounts[1] / ethers.parseEther("1"))
+    );
+    const swapParams3 = await createEncryptedSwapParams(
+      await fixture.pairCD.getAddress(),
+      routerAddress,
+      0,
+      Number(amounts[2] / ethers.parseEther("1"))
+    );
 
     await fixture.router.connect(signers.alice).swapExactTokensForTokens(
       amountIn,
       0n,
       path,
-      [encryptedSwapAmount1.handles[0], encryptedSwapAmount2.handles[0], encryptedSwapAmount3.handles[0]],
-      [encryptedSwapAmount1.inputProof, encryptedSwapAmount2.inputProof, encryptedSwapAmount3.inputProof],
+      [swapParams1, swapParams2, swapParams3],
       signers.alice.address,
       deadline,
     );
 
+    const pairBCAddress = await fixture.pairBC.getAddress();
+    const routerAddressBC = await fixture.router.getAddress();
+    const encryptedAmountB = await fhevm.createEncryptedInput(pairBCAddress, routerAddressBC).add64(Number(ethers.parseEther("30000") / ethers.parseEther("1"))).encrypt();
+    const encryptedAmountC = await fhevm.createEncryptedInput(pairBCAddress, routerAddressBC).add64(Number(ethers.parseEther("60000") / ethers.parseEther("1"))).encrypt();
+    
     const liquidityTx = fixture.router
       .connect(signers.bob)
       .addLiquidity(
@@ -197,6 +223,12 @@ describe("FHE Complex Scenarios - Stress Tests", function () {
         ethers.parseEther("60000"),
         0n,
         0n,
+        {
+          encryptedAmountA: encryptedAmountB.handles[0],
+          encryptedAmountB: encryptedAmountC.handles[0],
+          amountAProof: encryptedAmountB.inputProof,
+          amountBProof: encryptedAmountC.inputProof,
+        },
         signers.bob.address,
         deadline,
       );
@@ -231,25 +263,30 @@ describe("FHE Complex Scenarios - Stress Tests", function () {
     const amounts1 = await fixture.router.getAmountsOut(amountIn, path1);
     const amounts2 = await fixture.router.getAmountsOut(amountIn, path2);
     
-    const encryptedSwapAmount1_1 = await fhevm
-      .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-      .add32(Number(amountIn / ethers.parseEther("1")))
-      .encrypt();
-    const encryptedSwapAmount1_2 = await fhevm
-      .createEncryptedInput(await fixture.pairBC.getAddress(), routerAddress)
-      .add32(Number(amounts1[1] / ethers.parseEther("1")))
-      .encrypt();
-    const encryptedSwapAmount2 = await fhevm
-      .createEncryptedInput(await fixture.pairAC.getAddress(), routerAddress)
-      .add32(Number(amountIn / ethers.parseEther("1")))
-      .encrypt();
+    const swapParams1_1 = await createEncryptedSwapParams(
+      await fixture.pairAB.getAddress(),
+      routerAddress,
+      Number(amountIn / ethers.parseEther("1")),
+      0
+    );
+    const swapParams1_2 = await createEncryptedSwapParams(
+      await fixture.pairBC.getAddress(),
+      routerAddress,
+      0,
+      Number(amounts1[1] / ethers.parseEther("1"))
+    );
+    const swapParams2 = await createEncryptedSwapParams(
+      await fixture.pairAC.getAddress(),
+      routerAddress,
+      Number(amountIn / ethers.parseEther("1")),
+      0
+    );
 
     await fixture.router.connect(signers.alice).swapExactTokensForTokens(
       amountIn,
       0n,
       path1,
-      [encryptedSwapAmount1_1.handles[0], encryptedSwapAmount1_2.handles[0]],
-      [encryptedSwapAmount1_1.inputProof, encryptedSwapAmount1_2.inputProof],
+      [swapParams1_1, swapParams1_2],
       signers.alice.address,
       deadline,
     );
@@ -258,8 +295,7 @@ describe("FHE Complex Scenarios - Stress Tests", function () {
       amountIn,
       0n,
       path2,
-      [encryptedSwapAmount2.handles[0]],
-      [encryptedSwapAmount2.inputProof],
+      [swapParams2],
       signers.bob.address,
       deadline,
     );
@@ -280,17 +316,18 @@ describe("FHE Complex Scenarios - Stress Tests", function () {
     const swapAmount = ethers.parseEther("100");
     
     for (let i = 0; i < 20; i++) {
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-        .add32(Number(swapAmount / ethers.parseEther("1")))
-        .encrypt();
+      const swapParams = await createEncryptedSwapParams(
+        await fixture.pairAB.getAddress(),
+        routerAddress,
+        Number(swapAmount / ethers.parseEther("1")),
+        0
+      );
 
       await fixture.router.connect(signers.alice).swapExactTokensForTokens(
         swapAmount,
         0n,
         path,
-        [encryptedSwapAmount.handles[0]],
-        [encryptedSwapAmount.inputProof],
+        [swapParams],
         signers.alice.address,
         deadline,
       );
@@ -314,24 +351,30 @@ describe("FHE Complex Scenarios - Stress Tests", function () {
     const swapAmount = ethers.parseEther("500");
 
     // Alternate between swap and liquidity operations
+    const pairABAddress6 = await fixture.pairAB.getAddress();
     for (let i = 0; i < 5; i++) {
       // Create encrypted input for swap using router address
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-        .add32(Number(swapAmount / ethers.parseEther("1")))
-        .encrypt();
+      const swapParams = await createEncryptedSwapParams(
+        await fixture.pairAB.getAddress(),
+        routerAddress,
+        Number(swapAmount / ethers.parseEther("1")),
+        0
+      );
 
       await fixture.router.connect(signers.alice).swapExactTokensForTokens(
         swapAmount,
         0n,
         path,
-        [encryptedSwapAmount.handles[0]],
-        [encryptedSwapAmount.inputProof],
+        [swapParams],
         signers.alice.address,
         deadline,
       );
 
       // Add liquidity
+      const routerAddress6 = await fixture.router.getAddress();
+      const encryptedAmountA6 = await fhevm.createEncryptedInput(pairABAddress6, routerAddress6).add64(Number(ethers.parseEther("200") / ethers.parseEther("1"))).encrypt();
+      const encryptedAmountB6 = await fhevm.createEncryptedInput(pairABAddress6, routerAddress6).add64(Number(ethers.parseEther("400") / ethers.parseEther("1"))).encrypt();
+      
       await fixture.router
         .connect(signers.alice)
         .addLiquidity(
@@ -341,6 +384,12 @@ describe("FHE Complex Scenarios - Stress Tests", function () {
           ethers.parseEther("400"),
           0n,
           0n,
+          {
+            encryptedAmountA: encryptedAmountA6.handles[0],
+            encryptedAmountB: encryptedAmountB6.handles[0],
+            amountAProof: encryptedAmountA6.inputProof,
+            amountBProof: encryptedAmountB6.inputProof,
+          },
           signers.alice.address,
           deadline,
         );

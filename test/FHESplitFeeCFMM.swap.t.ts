@@ -2,7 +2,6 @@ import { ethers, fhevm } from "hardhat";
 import { expect } from "chai";
 import { getFHESigners, deployFHEFixture, type FHESigners, type FHEFixture } from "./helpers/fheFixtures";
 import { calculateInputForOutput } from "./helpers/calculations";
-import { FhevmType } from "@fhevm/hardhat-plugin";
 
 describe("FHESplitFeeCFMM - Swap", function () {
   let signers: FHESigners;
@@ -34,12 +33,18 @@ describe("FHESplitFeeCFMM - Swap", function () {
       reserveA,
     );
 
-    // Encrypt swap amount as euint32 (using a scaled value for demonstration)
-    // Note: euint32 has limited range, so we use a scaled representation
-    const swapAmountScaled = Number(amountBIn / ethers.parseEther("1")); // Scale down for euint32
-    const encryptedSwapAmount = await fhevm
+    // Encrypt swap amounts as euint64 (using a scaled value for demonstration)
+    // Note: We need encrypted inputs for both A and B, even if one is zero
+    const swapAmountBScaled = Number(amountBIn / ethers.parseEther("1")); // Scale down for euint64
+    const encryptedAmountBIn = await fhevm
       .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-      .add32(swapAmountScaled)
+      .add64(swapAmountBScaled)
+      .encrypt();
+    
+    // For tokenA input, we use 0 since we're swapping B for A
+    const encryptedAmountAIn = await fhevm
+      .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+      .add64(0)
       .encrypt();
 
     // Approve input token
@@ -48,23 +53,14 @@ describe("FHESplitFeeCFMM - Swap", function () {
     const reserveABefore = await fixture.pair.getReserveA();
     const reserveBBefore = await fixture.pair.getReserveB();
 
-    // Get encrypted accumulator before swap
-    const encryptedAccumulatorBefore = await fixture.pair.getEncryptedSwapAccumulator();
-    const clearAccumulatorBefore = encryptedAccumulatorBefore === ethers.ZeroHash 
-      ? 0 
-      : await fhevm.userDecryptEuint(
-          FhevmType.euint32,
-          encryptedAccumulatorBefore,
-          fixture.pairAddress,
-          signers.alice,
-        );
-
-    // Perform swap with encrypted amount
+    // Perform swap with encrypted amounts
     const tx = await fixture.pair
       .connect(signers.alice)
       .swap(
-        encryptedSwapAmount.handles[0],
-        encryptedSwapAmount.inputProof,
+        encryptedAmountAIn.handles[0],
+        encryptedAmountBIn.handles[0],
+        encryptedAmountAIn.inputProof,
+        encryptedAmountBIn.inputProof,
         amountAOut,
         0n,
         signers.alice.address
@@ -76,17 +72,6 @@ describe("FHESplitFeeCFMM - Swap", function () {
 
     expect(reserveAAfter).to.equal(reserveABefore - amountAOut);
     expect(reserveBAfter).to.be.gt(reserveBBefore);
-
-    // Verify encrypted accumulator was updated
-    const encryptedAccumulatorAfter = await fixture.pair.getEncryptedSwapAccumulator();
-    const clearAccumulatorAfter = await fhevm.userDecryptEuint(
-      FhevmType.euint32,
-      encryptedAccumulatorAfter,
-      fixture.pairAddress,
-      signers.alice,
-    );
-
-    expect(clearAccumulatorAfter).to.be.gt(clearAccumulatorBefore);
   });
 
   it("Should swap tokenA for tokenB using encrypted swap amount", async function () {
@@ -101,11 +86,17 @@ describe("FHESplitFeeCFMM - Swap", function () {
       reserveB,
     );
 
-    // Encrypt swap amount
-    const swapAmountScaled = Number(amountAIn / ethers.parseEther("1"));
-    const encryptedSwapAmount = await fhevm
+    // Encrypt swap amounts
+    const swapAmountAScaled = Number(amountAIn / ethers.parseEther("1"));
+    const encryptedAmountAIn = await fhevm
       .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-      .add32(swapAmountScaled)
+      .add64(swapAmountAScaled)
+      .encrypt();
+    
+    // For tokenB input, we use 0 since we're swapping A for B
+    const encryptedAmountBIn = await fhevm
+      .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+      .add64(0)
       .encrypt();
 
     // Approve input token
@@ -118,8 +109,10 @@ describe("FHESplitFeeCFMM - Swap", function () {
     const tx = await fixture.pair
       .connect(signers.alice)
       .swap(
-        encryptedSwapAmount.handles[0],
-        encryptedSwapAmount.inputProof,
+        encryptedAmountAIn.handles[0],
+        encryptedAmountBIn.handles[0],
+        encryptedAmountAIn.inputProof,
+        encryptedAmountBIn.inputProof,
         0n,
         amountBOut,
         signers.alice.address
@@ -144,10 +137,15 @@ describe("FHESplitFeeCFMM - Swap", function () {
     );
 
     // First swap
-    const swapAmountScaled1 = Number(amountBIn1 / ethers.parseEther("1"));
-    const encryptedSwapAmount1 = await fhevm
+    const swapAmountBScaled1 = Number(amountBIn1 / ethers.parseEther("1"));
+    const encryptedAmountBIn1 = await fhevm
       .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-      .add32(swapAmountScaled1)
+      .add64(swapAmountBScaled1)
+      .encrypt();
+    
+    const encryptedAmountAIn1 = await fhevm
+      .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+      .add64(0)
       .encrypt();
 
     await fixture.tokenB.connect(signers.alice).approve(fixture.pairAddress, amountBIn1 * 2n);
@@ -155,21 +153,15 @@ describe("FHESplitFeeCFMM - Swap", function () {
     let tx = await fixture.pair
       .connect(signers.alice)
       .swap(
-        encryptedSwapAmount1.handles[0],
-        encryptedSwapAmount1.inputProof,
+        encryptedAmountAIn1.handles[0],
+        encryptedAmountBIn1.handles[0],
+        encryptedAmountAIn1.inputProof,
+        encryptedAmountBIn1.inputProof,
         amountAOut1,
         0n,
         signers.alice.address
       );
     await tx.wait();
-
-    const encryptedAccumulatorAfter1 = await fixture.pair.getEncryptedSwapAccumulator();
-    const clearAccumulatorAfter1 = await fhevm.userDecryptEuint(
-      FhevmType.euint32,
-      encryptedAccumulatorAfter1,
-      fixture.pairAddress,
-      signers.alice,
-    );
 
     // Second swap
     const [reserveA2, reserveB2] = await fixture.pair.getReserves();
@@ -181,10 +173,15 @@ describe("FHESplitFeeCFMM - Swap", function () {
       reserveA2,
     );
 
-    const swapAmountScaled2 = Number(amountBIn2 / ethers.parseEther("1"));
-    const encryptedSwapAmount2 = await fhevm
+    const swapAmountBScaled2 = Number(amountBIn2 / ethers.parseEther("1"));
+    const encryptedAmountBIn2 = await fhevm
       .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-      .add32(swapAmountScaled2)
+      .add64(swapAmountBScaled2)
+      .encrypt();
+    
+    const encryptedAmountAIn2 = await fhevm
+      .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+      .add64(0)
       .encrypt();
 
     const balance = await fixture.tokenB.balanceOf(signers.alice.address);
@@ -197,24 +194,15 @@ describe("FHESplitFeeCFMM - Swap", function () {
     tx = await fixture.pair
       .connect(signers.alice)
       .swap(
-        encryptedSwapAmount2.handles[0],
-        encryptedSwapAmount2.inputProof,
+        encryptedAmountAIn2.handles[0],
+        encryptedAmountBIn2.handles[0],
+        encryptedAmountAIn2.inputProof,
+        encryptedAmountBIn2.inputProof,
         amountAOut2,
         0n,
         signers.alice.address
       );
     await tx.wait();
-
-    const encryptedAccumulatorAfter2 = await fixture.pair.getEncryptedSwapAccumulator();
-    const clearAccumulatorAfter2 = await fhevm.userDecryptEuint(
-      FhevmType.euint32,
-      encryptedAccumulatorAfter2,
-      fixture.pairAddress,
-      signers.alice,
-    );
-
-    // Accumulator should have increased
-    expect(clearAccumulatorAfter2).to.be.gt(clearAccumulatorAfter1);
   });
 
   it("Should emit Swap event", async function () {
@@ -227,10 +215,15 @@ describe("FHESplitFeeCFMM - Swap", function () {
       reserveA,
     );
 
-    const swapAmountScaled = Number(amountBIn / ethers.parseEther("1"));
-    const encryptedSwapAmount = await fhevm
+    const swapAmountBScaled = Number(amountBIn / ethers.parseEther("1"));
+    const encryptedAmountBIn = await fhevm
       .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-      .add32(swapAmountScaled)
+      .add64(swapAmountBScaled)
+      .encrypt();
+    
+    const encryptedAmountAIn = await fhevm
+      .createEncryptedInput(fixture.pairAddress, signers.alice.address)
+      .add64(0)
       .encrypt();
 
     await fixture.tokenB.connect(signers.alice).approve(fixture.pairAddress, amountBIn * 2n);
@@ -239,8 +232,10 @@ describe("FHESplitFeeCFMM - Swap", function () {
       fixture.pair
         .connect(signers.alice)
         .swap(
-          encryptedSwapAmount.handles[0],
-          encryptedSwapAmount.inputProof,
+          encryptedAmountAIn.handles[0],
+          encryptedAmountBIn.handles[0],
+          encryptedAmountAIn.inputProof,
+          encryptedAmountBIn.inputProof,
           amountAOut,
           0n,
           signers.alice.address
@@ -248,35 +243,5 @@ describe("FHESplitFeeCFMM - Swap", function () {
     ).to.emit(fixture.pair, "Swap");
   });
 
-  it("Should emit EncryptedSwapAccumulatorUpdated event", async function () {
-    const amountAOut = ethers.parseEther("100");
-    const [reserveA, reserveB] = await fixture.pair.getReserves();
-    const amountBIn = await calculateInputForOutput(
-      await fixture.tokenA.getAddress(),
-      amountAOut,
-      reserveB,
-      reserveA,
-    );
-
-    const swapAmountScaled = Number(amountBIn / ethers.parseEther("1"));
-    const encryptedSwapAmount = await fhevm
-      .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-      .add32(swapAmountScaled)
-      .encrypt();
-
-    await fixture.tokenB.connect(signers.alice).approve(fixture.pairAddress, amountBIn * 2n);
-
-    await expect(
-      fixture.pair
-        .connect(signers.alice)
-        .swap(
-          encryptedSwapAmount.handles[0],
-          encryptedSwapAmount.inputProof,
-          amountAOut,
-          0n,
-          signers.alice.address
-        )
-    ).to.emit(fixture.pair, "EncryptedSwapAccumulatorUpdated");
-  });
 });
 

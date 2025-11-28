@@ -2,7 +2,7 @@ import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { ethers, fhevm } from "hardhat";
 import { expect } from "chai";
 import { getFHESigners, type FHESigners } from "./helpers/fheFixtures";
-import { deployFHERouterFixture, type FHERouterFixture } from "./helpers/fheRouterFixtures";
+import { deployFHERouterFixture, type FHERouterFixture, createEncryptedSwapParams } from "./helpers/fheRouterFixtures";
 import { MockToken__factory } from "../../types";
 
 describe("FHEMarketRouter - Swap Failures", function () {
@@ -33,10 +33,13 @@ describe("FHEMarketRouter - Swap Failures", function () {
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
       const pairAddress = await fixture.pairAB.getAddress();
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(pairAddress, signers.alice.address)
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
+      const routerAddress = await fixture.router.getAddress();
+      const swapParams = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
 
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), amountIn);
 
@@ -47,8 +50,7 @@ describe("FHEMarketRouter - Swap Failures", function () {
             amountIn,
             0n,
             path,
-            [encryptedSwapAmount.handles[0]],
-            [encryptedSwapAmount.inputProof],
+            [swapParams],
             signers.alice.address,
             deadline,
           ),
@@ -65,8 +67,8 @@ describe("FHEMarketRouter - Swap Failures", function () {
       await expect(
         fixture.router
           .connect(signers.alice)
-          .swapExactTokensForTokens(amountIn, 0n, path, [], [], signers.alice.address, deadline),
-      ).to.be.revertedWith("FHEMarketRouter: Invalid encrypted amounts length");
+          .swapExactTokensForTokens(amountIn, 0n, path, [], signers.alice.address, deadline),
+      ).to.be.revertedWith("FHEMarketRouter: Invalid encrypted params length");
     });
 
     it("Should revert with zero address recipient", async function () {
@@ -75,10 +77,13 @@ describe("FHEMarketRouter - Swap Failures", function () {
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
       const pairAddress = await fixture.pairAB.getAddress();
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(pairAddress, signers.alice.address)
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
+      const routerAddress = await fixture.router.getAddress();
+      const swapParams = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
 
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), amountIn);
 
@@ -89,8 +94,7 @@ describe("FHEMarketRouter - Swap Failures", function () {
             amountIn,
             0n,
             path,
-            [encryptedSwapAmount.handles[0]],
-            [encryptedSwapAmount.inputProof],
+            [swapParams],
             ethers.ZeroAddress,
             deadline,
           ),
@@ -103,10 +107,13 @@ describe("FHEMarketRouter - Swap Failures", function () {
       const deadline = Math.floor(Date.now() / 1000) - 3600;
 
       const pairAddress = await fixture.pairAB.getAddress();
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(pairAddress, signers.alice.address)
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
+      const routerAddress = await fixture.router.getAddress();
+      const swapParams = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
 
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), amountIn);
 
@@ -117,8 +124,7 @@ describe("FHEMarketRouter - Swap Failures", function () {
             amountIn,
             0n,
             path,
-            [encryptedSwapAmount.handles[0]],
-            [encryptedSwapAmount.inputProof],
+            [swapParams],
             signers.alice.address,
             deadline,
           ),
@@ -132,10 +138,13 @@ describe("FHEMarketRouter - Swap Failures", function () {
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
       const pairAddress = await fixture.pairAB.getAddress();
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(pairAddress, signers.alice.address)
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
+      const routerAddress = await fixture.router.getAddress();
+      const swapParams = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
 
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), amountIn);
 
@@ -146,8 +155,7 @@ describe("FHEMarketRouter - Swap Failures", function () {
             amountIn,
             amountOutMin,
             path,
-            [encryptedSwapAmount.handles[0]],
-            [encryptedSwapAmount.inputProof],
+            [swapParams],
             signers.alice.address,
             deadline,
           ),
@@ -163,10 +171,13 @@ describe("FHEMarketRouter - Swap Failures", function () {
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
       const pairAddress = await fixture.pairAB.getAddress();
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(pairAddress, signers.alice.address)
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
+      const routerAddress = await fixture.router.getAddress();
+      const swapParams = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
 
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), amountIn);
 
@@ -177,8 +188,7 @@ describe("FHEMarketRouter - Swap Failures", function () {
             amountIn,
             0n,
             path,
-            [encryptedSwapAmount.handles[0]],
-            [encryptedSwapAmount.inputProof],
+            [swapParams],
             signers.alice.address,
             deadline,
           ),
@@ -192,24 +202,9 @@ describe("FHEMarketRouter - Swap Failures", function () {
       const path = [await fixture.tokenA.getAddress()];
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
-      const pairAddress = await fixture.pairAB.getAddress();
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(pairAddress, signers.alice.address)
-        .add32(Number(amountOut / ethers.parseEther("1")))
-        .encrypt();
-
+      // getAmountsIn should revert with invalid path
       await expect(
-        fixture.router
-          .connect(signers.alice)
-          .swapTokensForExactTokens(
-            amountOut,
-            ethers.parseEther("10000"),
-            path,
-            [encryptedSwapAmount.handles[0]],
-            [encryptedSwapAmount.inputProof],
-            signers.alice.address,
-            deadline,
-          ),
+        fixture.router.getAmountsIn(amountOut, path)
       ).to.be.revertedWith("FHEMarketRouter: Invalid path");
     });
 
@@ -219,10 +214,14 @@ describe("FHEMarketRouter - Swap Failures", function () {
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
       const pairAddress = await fixture.pairAB.getAddress();
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(pairAddress, signers.alice.address)
-        .add32(Number(amountOut / ethers.parseEther("1")))
-        .encrypt();
+      const routerAddress = await fixture.router.getAddress();
+      const amounts = await fixture.router.getAmountsIn(amountOut, path);
+      const swapParams = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        Number(amounts[0] / ethers.parseEther("1")),
+        0
+      );
 
       await expect(
         fixture.router
@@ -231,8 +230,7 @@ describe("FHEMarketRouter - Swap Failures", function () {
             amountOut,
             ethers.parseEther("10000"),
             path,
-            [encryptedSwapAmount.handles[0]],
-            [encryptedSwapAmount.inputProof],
+            [swapParams],
             ethers.ZeroAddress,
             deadline,
           ),
@@ -245,10 +243,14 @@ describe("FHEMarketRouter - Swap Failures", function () {
       const deadline = Math.floor(Date.now() / 1000) - 3600;
 
       const pairAddress = await fixture.pairAB.getAddress();
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(pairAddress, signers.alice.address)
-        .add32(Number(amountOut / ethers.parseEther("1")))
-        .encrypt();
+      const routerAddress = await fixture.router.getAddress();
+      const amounts = await fixture.router.getAmountsIn(amountOut, path);
+      const swapParams = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        Number(amounts[0] / ethers.parseEther("1")),
+        0
+      );
 
       await expect(
         fixture.router
@@ -257,8 +259,7 @@ describe("FHEMarketRouter - Swap Failures", function () {
             amountOut,
             ethers.parseEther("10000"),
             path,
-            [encryptedSwapAmount.handles[0]],
-            [encryptedSwapAmount.inputProof],
+            [swapParams],
             signers.alice.address,
             deadline,
           ),

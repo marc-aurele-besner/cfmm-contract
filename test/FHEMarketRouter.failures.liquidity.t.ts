@@ -29,6 +29,11 @@ describe("FHEMarketRouter - Liquidity Failures", function () {
     it("Should revert with identical token addresses", async function () {
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
+      const pairAddress = await fixture.pairAB.getAddress();
+      const routerAddress = await fixture.router.getAddress();
+      const encryptedAmountA = await fhevm.createEncryptedInput(pairAddress, routerAddress).add64(Number(ethers.parseEther("1000") / ethers.parseEther("1"))).encrypt();
+      const encryptedAmountB = await fhevm.createEncryptedInput(pairAddress, routerAddress).add64(Number(ethers.parseEther("2000") / ethers.parseEther("1"))).encrypt();
+      
       await expect(
         fixture.router
           .connect(signers.alice)
@@ -39,6 +44,12 @@ describe("FHEMarketRouter - Liquidity Failures", function () {
             ethers.parseEther("2000"),
             0n,
             0n,
+            {
+              encryptedAmountA: encryptedAmountA.handles[0],
+              encryptedAmountB: encryptedAmountB.handles[0],
+              amountAProof: encryptedAmountA.inputProof,
+              amountBProof: encryptedAmountB.inputProof,
+            },
             signers.alice.address,
             deadline,
           ),
@@ -48,6 +59,11 @@ describe("FHEMarketRouter - Liquidity Failures", function () {
     it("Should revert with zero address token", async function () {
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
+      const pairAddress = await fixture.pairAB.getAddress();
+      const routerAddress = await fixture.router.getAddress();
+      const encryptedAmountA = await fhevm.createEncryptedInput(pairAddress, routerAddress).add64(Number(ethers.parseEther("1000") / ethers.parseEther("1"))).encrypt();
+      const encryptedAmountB = await fhevm.createEncryptedInput(pairAddress, routerAddress).add64(Number(ethers.parseEther("2000") / ethers.parseEther("1"))).encrypt();
+      
       await expect(
         fixture.router
           .connect(signers.alice)
@@ -58,6 +74,12 @@ describe("FHEMarketRouter - Liquidity Failures", function () {
             ethers.parseEther("2000"),
             0n,
             0n,
+            {
+              encryptedAmountA: encryptedAmountA.handles[0],
+              encryptedAmountB: encryptedAmountB.handles[0],
+              amountAProof: encryptedAmountA.inputProof,
+              amountBProof: encryptedAmountB.inputProof,
+            },
             signers.alice.address,
             deadline,
           ),
@@ -67,6 +89,11 @@ describe("FHEMarketRouter - Liquidity Failures", function () {
     it("Should revert with expired deadline", async function () {
       const deadline = Math.floor(Date.now() / 1000) - 3600;
 
+      const pairAddress = await fixture.pairAB.getAddress();
+      const routerAddress = await fixture.router.getAddress();
+      const encryptedAmountA = await fhevm.createEncryptedInput(pairAddress, routerAddress).add64(Number(ethers.parseEther("1000") / ethers.parseEther("1"))).encrypt();
+      const encryptedAmountB = await fhevm.createEncryptedInput(pairAddress, routerAddress).add64(Number(ethers.parseEther("2000") / ethers.parseEther("1"))).encrypt();
+      
       await expect(
         fixture.router
           .connect(signers.alice)
@@ -77,6 +104,12 @@ describe("FHEMarketRouter - Liquidity Failures", function () {
             ethers.parseEther("2000"),
             0n,
             0n,
+            {
+              encryptedAmountA: encryptedAmountA.handles[0],
+              encryptedAmountB: encryptedAmountB.handles[0],
+              amountAProof: encryptedAmountA.inputProof,
+              amountBProof: encryptedAmountB.inputProof,
+            },
             signers.alice.address,
             deadline,
           ),
@@ -92,18 +125,29 @@ describe("FHEMarketRouter - Liquidity Failures", function () {
       await fixture.tokenB.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
       await fixture.pairAB.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
 
+      const pairAddress = await fixture.pairAB.getAddress();
+      const routerAddress = await fixture.router.getAddress();
+      const encryptedAmountA = await fhevm.createEncryptedInput(pairAddress, routerAddress).add64(Number(ethers.parseEther("1000") / ethers.parseEther("1"))).encrypt();
+      const encryptedAmountB = await fhevm.createEncryptedInput(pairAddress, routerAddress).add64(Number(ethers.parseEther("2000") / ethers.parseEther("1"))).encrypt();
+      
       await fixture.router
         .connect(signers.alice)
-        .addLiquidity(
-          await fixture.tokenA.getAddress(),
-          await fixture.tokenB.getAddress(),
-          ethers.parseEther("1000"),
-          ethers.parseEther("2000"),
-          0n,
-          0n,
-          signers.alice.address,
-          deadline,
-        );
+          .addLiquidity(
+            await fixture.tokenA.getAddress(),
+            await fixture.tokenB.getAddress(),
+            ethers.parseEther("1000"),
+            ethers.parseEther("2000"),
+            0n,
+            0n,
+            {
+              encryptedAmountA: encryptedAmountA.handles[0],
+              encryptedAmountB: encryptedAmountB.handles[0],
+              amountAProof: encryptedAmountA.inputProof,
+              amountBProof: encryptedAmountB.inputProof,
+            },
+            signers.alice.address,
+            deadline,
+          );
     });
 
     it("Should revert with zero address token", async function () {

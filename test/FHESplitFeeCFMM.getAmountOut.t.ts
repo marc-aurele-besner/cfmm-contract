@@ -104,13 +104,21 @@ describe("FHESplitFeeCFMM - getAmountOut", function () {
     const swapAmountScaled = Number(amountBIn / ethers.parseEther("1"));
     const encryptedSwapAmount = await fhevm
       .createEncryptedInput(fixture.pairAddress, signers.alice.address)
-      .add32(swapAmountScaled)
+        .add64(swapAmountScaled)
       .encrypt();
 
     await fixture.tokenB.connect(signers.alice).approve(fixture.pairAddress, amountBIn * 2n);
     await fixture.pair
       .connect(signers.alice)
-      .swap(encryptedSwapAmount.handles[0], encryptedSwapAmount.inputProof, amountAOut, 0n, signers.alice.address);
+      .swap(
+        encryptedSwapAmount.handles[0],
+        encryptedSwapAmount.handles[0],
+        encryptedSwapAmount.inputProof,
+        encryptedSwapAmount.inputProof,
+        amountAOut,
+        0n,
+        signers.alice.address
+      );
 
     // Now check getAmountOut with new reserves
     const amountIn = ethers.parseEther("1000");

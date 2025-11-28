@@ -2,7 +2,7 @@ import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { ethers, fhevm } from "hardhat";
 import { expect } from "chai";
 import { getFHESigners, type FHESigners } from "./helpers/fheFixtures";
-import { deployFHERouterFixture, type FHERouterFixture } from "./helpers/fheRouterFixtures";
+import { deployFHERouterFixture, type FHERouterFixture, createEncryptedSwapParams } from "./helpers/fheRouterFixtures";
 
 describe("FHEMarketRouter - Swap", function () {
   let signers: FHESigners;
@@ -36,13 +36,15 @@ describe("FHEMarketRouter - Swap", function () {
       const path = [await fixture.tokenA.getAddress(), await fixture.tokenB.getAddress()];
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
-      // Create encrypted swap amount for router address (where msg.sender will be when pair is called)
+      // Create encrypted swap params for router address (where msg.sender will be when pair is called)
       const pairAddress = await fixture.pairAB.getAddress();
       const routerAddress = await fixture.router.getAddress();
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(pairAddress, routerAddress) // Use router address, not user!
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
+      const swapParams = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")), // A in
+        0 // B in
+      );
 
       const balanceBefore = await fixture.tokenB.balanceOf(signers.alice.address);
 
@@ -52,8 +54,7 @@ describe("FHEMarketRouter - Swap", function () {
         amountIn,
         amountOutMin,
         path,
-        [encryptedSwapAmount.handles[0]],
-        [encryptedSwapAmount.inputProof],
+        [swapParams],
         signers.alice.address,
         deadline,
       );
@@ -73,18 +74,24 @@ describe("FHEMarketRouter - Swap", function () {
       ];
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
-      // Create encrypted swap amounts for each hop (use router address for signer)
+      // Create encrypted swap params for each hop (use router address for signer)
       const pairABAddress = await fixture.pairAB.getAddress();
       const pairBCAddress = await fixture.pairBC.getAddress();
       const routerAddress = await fixture.router.getAddress();
-      const encryptedSwapAmount1 = await fhevm
-        .createEncryptedInput(pairABAddress, routerAddress) // Use router address!
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
-      const encryptedSwapAmount2 = await fhevm
-        .createEncryptedInput(pairBCAddress, routerAddress) // Use router address!
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
+      
+      const swapParams1 = await createEncryptedSwapParams(
+        pairABAddress,
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")), // A in
+        0 // B in
+      );
+      
+      const swapParams2 = await createEncryptedSwapParams(
+        pairBCAddress,
+        routerAddress,
+        0, // A in
+        Number(amountIn / ethers.parseEther("1")) // B in
+      );
 
       const balanceBefore = await fixture.tokenC.balanceOf(signers.alice.address);
 
@@ -94,8 +101,7 @@ describe("FHEMarketRouter - Swap", function () {
         amountIn,
         amountOutMin,
         path,
-        [encryptedSwapAmount1.handles[0], encryptedSwapAmount2.handles[0]],
-        [encryptedSwapAmount1.inputProof, encryptedSwapAmount2.inputProof],
+        [swapParams1, swapParams2],
         signers.alice.address,
         deadline,
       );
@@ -120,25 +126,29 @@ describe("FHEMarketRouter - Swap", function () {
       const deadline = Math.floor(Date.now() / 1000) + 3600;
       const amounts = await fixture.router.getAmountsOut(amountIn, path);
 
-      // Create encrypted swap amounts (use router address for signer)
+      // Create encrypted swap params (use router address for signer)
       const pairABAddress = await fixture.pairAB.getAddress();
       const pairBCAddress = await fixture.pairBC.getAddress();
       const routerAddress = await fixture.router.getAddress();
-      const encryptedSwapAmount1 = await fhevm
-        .createEncryptedInput(pairABAddress, routerAddress) // Use router address!
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
-      const encryptedSwapAmount2 = await fhevm
-        .createEncryptedInput(pairBCAddress, routerAddress) // Use router address!
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
+      
+      const swapParams1 = await createEncryptedSwapParams(
+        pairABAddress,
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
+      const swapParams2 = await createEncryptedSwapParams(
+        pairBCAddress,
+        routerAddress,
+        0,
+        Number(amountIn / ethers.parseEther("1"))
+      );
 
       await fixture.router.connect(signers.alice).swapExactTokensForTokens(
         amountIn,
         0n,
         path,
-        [encryptedSwapAmount1.handles[0], encryptedSwapAmount2.handles[0]],
-        [encryptedSwapAmount1.inputProof, encryptedSwapAmount2.inputProof],
+        [swapParams1, swapParams2],
         signers.alice.address,
         deadline,
       );
@@ -156,14 +166,19 @@ describe("FHEMarketRouter - Swap", function () {
 
       const pairAddress = await fixture.pairAB.getAddress();
       const routerAddress = await fixture.router.getAddress();
-      const encryptedSwapAmountAlice = await fhevm
-        .createEncryptedInput(pairAddress, routerAddress) // Use router address!
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
-      const encryptedSwapAmountBob = await fhevm
-        .createEncryptedInput(pairAddress, routerAddress) // Use router address!
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
+      
+      const swapParamsAlice = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
+      const swapParamsBob = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
 
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
       await fixture.tokenA.connect(signers.bob).approve(await fixture.router.getAddress(), ethers.MaxUint256);
@@ -172,8 +187,7 @@ describe("FHEMarketRouter - Swap", function () {
         amountIn,
         0n,
         path,
-        [encryptedSwapAmountAlice.handles[0]],
-        [encryptedSwapAmountAlice.inputProof],
+        [swapParamsAlice],
         signers.alice.address,
         deadline,
       );
@@ -182,8 +196,7 @@ describe("FHEMarketRouter - Swap", function () {
         amountIn,
         0n,
         path,
-        [encryptedSwapAmountBob.handles[0]],
-        [encryptedSwapAmountBob.inputProof],
+        [swapParamsBob],
         signers.bob.address,
         deadline,
       );
@@ -205,10 +218,13 @@ describe("FHEMarketRouter - Swap", function () {
 
       const pairAddress = await fixture.pairAB.getAddress();
       const routerAddress = await fixture.router.getAddress();
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(pairAddress, routerAddress) // Use router address!
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
+      
+      const swapParams = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
 
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
 
@@ -216,8 +232,7 @@ describe("FHEMarketRouter - Swap", function () {
         amountIn,
         amountOutMin,
         path,
-        [encryptedSwapAmount.handles[0]],
-        [encryptedSwapAmount.inputProof],
+        [swapParams],
         signers.alice.address,
         deadline,
       );
@@ -237,10 +252,15 @@ describe("FHEMarketRouter - Swap", function () {
 
       const pairAddress = await fixture.pairAB.getAddress();
       const routerAddress = await fixture.router.getAddress();
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(pairAddress, routerAddress) // Use router address!
-        .add32(Number(amountOut / ethers.parseEther("1")))
-        .encrypt();
+      
+      // For swapTokensForExactTokens, we need to estimate the input amount
+      const amounts = await fixture.router.getAmountsIn(amountOut, path);
+      const swapParams = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        Number(amounts[0] / ethers.parseEther("1")),
+        0
+      );
 
       const balanceBefore = await fixture.tokenB.balanceOf(signers.alice.address);
 
@@ -250,8 +270,7 @@ describe("FHEMarketRouter - Swap", function () {
         amountOut,
         amountInMax,
         path,
-        [encryptedSwapAmount.handles[0]],
-        [encryptedSwapAmount.inputProof],
+        [swapParams],
         signers.alice.address,
         deadline,
       );
@@ -271,10 +290,13 @@ describe("FHEMarketRouter - Swap", function () {
 
       const pairAddress = await fixture.pairAB.getAddress();
       const routerAddress = await fixture.router.getAddress();
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(pairAddress, routerAddress) // Use router address!
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
+      
+      const swapParams = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        Number(amountIn / ethers.parseEther("1")),
+        0
+      );
 
       await fixture.tokenA.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
 
@@ -282,8 +304,7 @@ describe("FHEMarketRouter - Swap", function () {
         amountIn,
         amountOutMin,
         path,
-        [encryptedSwapAmount.handles[0]],
-        [encryptedSwapAmount.inputProof],
+        [swapParams],
         signers.alice.address,
         deadline,
       );
@@ -300,10 +321,14 @@ describe("FHEMarketRouter - Swap", function () {
 
       const pairAddress = await fixture.pairAB.getAddress();
       const routerAddress = await fixture.router.getAddress();
-      const encryptedSwapAmount = await fhevm
-        .createEncryptedInput(pairAddress, routerAddress) // Use router address!
-        .add32(Number(amountIn / ethers.parseEther("1")))
-        .encrypt();
+      
+      // For reverse swap (B -> A), we use B as input
+      const swapParams = await createEncryptedSwapParams(
+        pairAddress,
+        routerAddress,
+        0,
+        Number(amountIn / ethers.parseEther("1"))
+      );
 
       await fixture.tokenB.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
 
@@ -312,8 +337,7 @@ describe("FHEMarketRouter - Swap", function () {
         amountIn,
         0n,
         path,
-        [encryptedSwapAmount.handles[0]],
-        [encryptedSwapAmount.inputProof],
+        [swapParams],
         signers.alice.address,
         deadline,
       );

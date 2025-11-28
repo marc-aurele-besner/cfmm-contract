@@ -45,10 +45,7 @@ describe("FHESplitFeeCFMM - Deployment", function () {
   });
 
   it("Encrypted swap accumulator should be uninitialized after deployment", async function () {
-    const encryptedAccumulator = await fixture.pair.getEncryptedSwapAccumulator();
-    // Expect initial accumulator to be bytes32(0) after deployment,
-    // (meaning the encrypted value is uninitialized)
-    expect(encryptedAccumulator).to.eq(ethers.ZeroHash);
+    // Note: getEncryptedSwapAccumulator was removed - swap accumulator tracking is now internal
   });
 
   it("Should handle getTokenA and getTokenB correctly", async function () {

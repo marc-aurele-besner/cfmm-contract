@@ -3,6 +3,7 @@ import { ethers, fhevm } from "hardhat";
 import { expect } from "chai";
 import { getFHESigners, type FHESigners } from "./helpers/fheFixtures";
 import { deployFHEComplexFixture, type FHEComplexFixture } from "./helpers/fheComplexFixtures";
+import { createEncryptedSwapParams } from "./helpers/fheRouterFixtures";
 
 describe("FHE Complex Scenarios - Flash Loans", function () {
   let fixture: FHEComplexFixture;
@@ -47,21 +48,24 @@ describe("FHE Complex Scenarios - Flash Loans", function () {
 
       // Create encrypted inputs for multi-hop swap using router address
       const routerAddress = await fixture.router.getAddress();
-      const encryptedSwapAmount1 = await fhevm
-        .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-        .add32(Number(flashLoanAmount / ethers.parseEther("1")))
-        .encrypt();
-      const encryptedSwapAmount2 = await fhevm
-        .createEncryptedInput(await fixture.pairBC.getAddress(), routerAddress)
-        .add32(Number(amountsMultiHop[1] / ethers.parseEther("1")))
-        .encrypt();
+      const swapParams1 = await createEncryptedSwapParams(
+        await fixture.pairAB.getAddress(),
+        routerAddress,
+        Number(flashLoanAmount / ethers.parseEther("1")),
+        0
+      );
+      const swapParams2 = await createEncryptedSwapParams(
+        await fixture.pairBC.getAddress(),
+        routerAddress,
+        0,
+        Number(amountsMultiHop[1] / ethers.parseEther("1"))
+      );
 
       await fixture.router.connect(signers.alice).swapExactTokensForTokens(
         flashLoanAmount,
         0n,
         pathMultiHop,
-        [encryptedSwapAmount1.handles[0], encryptedSwapAmount2.handles[0]],
-        [encryptedSwapAmount1.inputProof, encryptedSwapAmount2.inputProof],
+        [swapParams1, swapParams2],
         signers.alice.address,
         deadline,
       );
@@ -83,6 +87,11 @@ describe("FHE Complex Scenarios - Flash Loans", function () {
     const lpBalanceBefore = await fixture.pairAB.balanceOf(signers.alice.address);
 
     const deadline = Math.floor(Date.now() / 1000) + 3600;
+    const pairABAddress = await fixture.pairAB.getAddress();
+    const routerAddress = await fixture.router.getAddress();
+    const encryptedAmountA = await fhevm.createEncryptedInput(pairABAddress, routerAddress).add64(Number(flashLoanAmount / ethers.parseEther("1"))).encrypt();
+    const encryptedAmountB = await fhevm.createEncryptedInput(pairABAddress, routerAddress).add64(Number((flashLoanAmount * 2n) / ethers.parseEther("1"))).encrypt();
+    
     await fixture.router
       .connect(signers.alice)
       .addLiquidity(
@@ -92,6 +101,12 @@ describe("FHE Complex Scenarios - Flash Loans", function () {
         flashLoanAmount * 2n,
         0n,
         0n,
+        {
+          encryptedAmountA: encryptedAmountA.handles[0],
+          encryptedAmountB: encryptedAmountB.handles[0],
+          amountAProof: encryptedAmountA.inputProof,
+          amountBProof: encryptedAmountB.inputProof,
+        },
         signers.alice.address,
         deadline,
       );
@@ -135,21 +150,24 @@ describe("FHE Complex Scenarios - Flash Loans", function () {
     const routerAddress = await fixture.router.getAddress();
     const amounts1 = await fixture.router.getAmountsOut(flashLoanAmount, path1);
     
-    const encryptedSwapAmount1 = await fhevm
-      .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-      .add32(Number(flashLoanAmount / ethers.parseEther("1")))
-      .encrypt();
-    const encryptedSwapAmount2 = await fhevm
-      .createEncryptedInput(await fixture.pairBC.getAddress(), routerAddress)
-      .add32(Number(amounts1[1] / ethers.parseEther("1")))
-      .encrypt();
+    const swapParams1 = await createEncryptedSwapParams(
+      await fixture.pairAB.getAddress(),
+      routerAddress,
+      Number(flashLoanAmount / ethers.parseEther("1")),
+      0
+    );
+    const swapParams2 = await createEncryptedSwapParams(
+      await fixture.pairBC.getAddress(),
+      routerAddress,
+      0,
+      Number(amounts1[1] / ethers.parseEther("1"))
+    );
 
     await fixture.router.connect(signers.alice).swapExactTokensForTokens(
       flashLoanAmount,
       0n,
       path1,
-      [encryptedSwapAmount1.handles[0]],
-      [encryptedSwapAmount1.inputProof],
+      [swapParams1],
       signers.alice.address,
       deadline,
     );
@@ -158,8 +176,7 @@ describe("FHE Complex Scenarios - Flash Loans", function () {
       amounts1[1],
       0n,
       path2,
-      [encryptedSwapAmount2.handles[0]],
-      [encryptedSwapAmount2.inputProof],
+      [swapParams2],
       signers.alice.address,
       deadline,
     );
@@ -186,21 +203,24 @@ describe("FHE Complex Scenarios - Flash Loans", function () {
     const routerAddress = await fixture.router.getAddress();
     const amounts1 = await fixture.router.getAmountsOut(flashLoanAmount, path1);
     
-    const encryptedSwapAmount1 = await fhevm
-      .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-      .add32(Number(flashLoanAmount / ethers.parseEther("1")))
-      .encrypt();
-    const encryptedSwapAmount2 = await fhevm
-      .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-      .add32(Number(amounts1[1] / ethers.parseEther("1")))
-      .encrypt();
+    const swapParams1 = await createEncryptedSwapParams(
+      await fixture.pairAB.getAddress(),
+      routerAddress,
+      Number(flashLoanAmount / ethers.parseEther("1")),
+      0
+    );
+    const swapParams2 = await createEncryptedSwapParams(
+      await fixture.pairAB.getAddress(),
+      routerAddress,
+      0,
+      Number(amounts1[1] / ethers.parseEther("1"))
+    );
 
     await fixture.router.connect(signers.alice).swapExactTokensForTokens(
       flashLoanAmount,
       0n,
       path1,
-      [encryptedSwapAmount1.handles[0]],
-      [encryptedSwapAmount1.inputProof],
+      [swapParams1],
       signers.alice.address,
       deadline,
     );
@@ -209,8 +229,7 @@ describe("FHE Complex Scenarios - Flash Loans", function () {
       amounts1[1],
       0n,
       path2,
-      [encryptedSwapAmount2.handles[0]],
-      [encryptedSwapAmount2.inputProof],
+      [swapParams2],
       signers.alice.address,
       deadline,
     );
@@ -243,25 +262,30 @@ describe("FHE Complex Scenarios - Flash Loans", function () {
     const routerAddress = await fixture.router.getAddress();
     const amounts = await fixture.router.getAmountsOut(flashLoanAmount, path);
     
-    const encryptedSwapAmount1 = await fhevm
-      .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-      .add32(Number(flashLoanAmount / ethers.parseEther("1")))
-      .encrypt();
-    const encryptedSwapAmount2 = await fhevm
-      .createEncryptedInput(await fixture.pairBC.getAddress(), routerAddress)
-      .add32(Number(amounts[1] / ethers.parseEther("1")))
-      .encrypt();
-    const encryptedSwapAmount3 = await fhevm
-      .createEncryptedInput(await fixture.pairCD.getAddress(), routerAddress)
-      .add32(Number(amounts[2] / ethers.parseEther("1")))
-      .encrypt();
+    const swapParams1 = await createEncryptedSwapParams(
+      await fixture.pairAB.getAddress(),
+      routerAddress,
+      Number(flashLoanAmount / ethers.parseEther("1")),
+      0
+    );
+    const swapParams2 = await createEncryptedSwapParams(
+      await fixture.pairBC.getAddress(),
+      routerAddress,
+      0,
+      Number(amounts[1] / ethers.parseEther("1"))
+    );
+    const swapParams3 = await createEncryptedSwapParams(
+      await fixture.pairCD.getAddress(),
+      routerAddress,
+      0,
+      Number(amounts[2] / ethers.parseEther("1"))
+    );
 
     await fixture.router.connect(signers.alice).swapExactTokensForTokens(
       flashLoanAmount,
       0n,
       path,
-      [encryptedSwapAmount1.handles[0], encryptedSwapAmount2.handles[0], encryptedSwapAmount3.handles[0]],
-      [encryptedSwapAmount1.inputProof, encryptedSwapAmount2.inputProof, encryptedSwapAmount3.inputProof],
+      [swapParams1, swapParams2, swapParams3],
       signers.alice.address,
       deadline,
     );
@@ -287,21 +311,24 @@ describe("FHE Complex Scenarios - Flash Loans", function () {
     const routerAddress = await fixture.router.getAddress();
     const amounts1 = await fixture.router.getAmountsOut(flashLoanAmount, path1);
     
-    const encryptedSwapAmount1 = await fhevm
-      .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-      .add32(Number(flashLoanAmount / ethers.parseEther("1")))
-      .encrypt();
-    const encryptedSwapAmount2 = await fhevm
-      .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-      .add32(Number(amounts1[1] / ethers.parseEther("1")))
-      .encrypt();
+    const swapParams1 = await createEncryptedSwapParams(
+      await fixture.pairAB.getAddress(),
+      routerAddress,
+      Number(flashLoanAmount / ethers.parseEther("1")),
+      0
+    );
+    const swapParams2 = await createEncryptedSwapParams(
+      await fixture.pairAB.getAddress(),
+      routerAddress,
+      0,
+      Number(amounts1[1] / ethers.parseEther("1"))
+    );
 
     await fixture.router.connect(signers.alice).swapExactTokensForTokens(
       flashLoanAmount,
       0n,
       path1,
-      [encryptedSwapAmount1.handles[0]],
-      [encryptedSwapAmount1.inputProof],
+      [swapParams1],
       signers.alice.address,
       deadline,
     );
@@ -310,8 +337,7 @@ describe("FHE Complex Scenarios - Flash Loans", function () {
       amounts1[1],
       0n,
       path2,
-      [encryptedSwapAmount2.handles[0]],
-      [encryptedSwapAmount2.inputProof],
+      [swapParams2],
       signers.alice.address,
       deadline,
     );

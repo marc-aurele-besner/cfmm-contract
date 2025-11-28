@@ -135,14 +135,8 @@ describe("FHEMarketRouter - Calculations", function () {
     });
 
     it("Should handle getPair for all created pairs", async function () {
-      const pairAB = await fixture.router.getPair(
-        await fixture.tokenA.getAddress(),
-        await fixture.tokenB.getAddress(),
-      );
-      const pairBC = await fixture.router.getPair(
-        await fixture.tokenB.getAddress(),
-        await fixture.tokenC.getAddress(),
-      );
+      const pairAB = await fixture.router.getPair(await fixture.tokenA.getAddress(), await fixture.tokenB.getAddress());
+      const pairBC = await fixture.router.getPair(await fixture.tokenB.getAddress(), await fixture.tokenC.getAddress());
 
       expect(pairAB).to.equal(await fixture.pairAB.getAddress());
       expect(pairBC).to.equal(await fixture.pairBC.getAddress());
@@ -150,14 +144,8 @@ describe("FHEMarketRouter - Calculations", function () {
     });
 
     it("Should handle getPair with reverse token order", async function () {
-      const pairAB = await fixture.router.getPair(
-        await fixture.tokenA.getAddress(),
-        await fixture.tokenB.getAddress(),
-      );
-      const pairBA = await fixture.router.getPair(
-        await fixture.tokenB.getAddress(),
-        await fixture.tokenA.getAddress(),
-      );
+      const pairAB = await fixture.router.getPair(await fixture.tokenA.getAddress(), await fixture.tokenB.getAddress());
+      const pairBA = await fixture.router.getPair(await fixture.tokenB.getAddress(), await fixture.tokenA.getAddress());
       expect(pairAB).to.equal(pairBA);
     });
 
@@ -177,7 +165,7 @@ describe("FHEMarketRouter - Calculations", function () {
       // Perform swap directly on pair (this works because msg.sender is the user)
       const amountBOut = amountsBefore[1];
       const [reserveA, reserveB] = await fixture.pairAB.getReserves();
-      
+
       if (amountBOut > 0n && reserveB >= amountBOut) {
         const amountAIn = await calculateInputForOutput(
           await fixture.tokenB.getAddress(),
@@ -187,15 +175,28 @@ describe("FHEMarketRouter - Calculations", function () {
         );
 
         const swapAmountScaled = Number(amountAIn / ethers.parseEther("1"));
-        const encryptedSwapAmount = await fhevm
-          .createEncryptedInput(await fixture.pairAB.getAddress(), signers.alice.address)
-          .add32(swapAmountScaled)
+        const pairAddress = await fixture.pairAB.getAddress();
+        const encryptedAmountAIn = await fhevm
+          .createEncryptedInput(pairAddress, signers.alice.address)
+          .add64(swapAmountScaled)
+          .encrypt();
+        const encryptedAmountBIn = await fhevm
+          .createEncryptedInput(pairAddress, signers.alice.address)
+          .add64(0)
           .encrypt();
 
-        await fixture.tokenA.connect(signers.alice).approve(await fixture.pairAB.getAddress(), amountAIn * 2n);
+        await fixture.tokenA.connect(signers.alice).approve(pairAddress, amountAIn * 2n);
         await fixture.pairAB
           .connect(signers.alice)
-          .swap(encryptedSwapAmount.handles[0], encryptedSwapAmount.inputProof, 0n, amountBOut, signers.alice.address);
+          .swap(
+            encryptedAmountAIn.handles[0],
+            encryptedAmountBIn.handles[0],
+            encryptedAmountAIn.inputProof,
+            encryptedAmountBIn.inputProof,
+            0n,
+            amountBOut,
+            signers.alice.address,
+          );
 
         // Get amounts after swap
         const amountsAfter = await fixture.router.getAmountsOut(amountIn, path);
@@ -206,4 +207,3 @@ describe("FHEMarketRouter - Calculations", function () {
     });
   });
 });
-

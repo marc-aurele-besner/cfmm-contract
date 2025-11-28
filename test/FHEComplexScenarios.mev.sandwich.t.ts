@@ -3,6 +3,7 @@ import { ethers, fhevm } from "hardhat";
 import { expect } from "chai";
 import { getFHESigners, type FHESigners } from "./helpers/fheFixtures";
 import { deployFHEComplexFixture, type FHEComplexFixture } from "./helpers/fheComplexFixtures";
+import { createEncryptedSwapParams } from "./helpers/fheRouterFixtures";
 
 describe("FHE Complex Scenarios - MEV Sandwich", function () {
   let fixture: FHEComplexFixture;
@@ -34,6 +35,11 @@ describe("FHE Complex Scenarios - MEV Sandwich", function () {
     await fixture.tokenB.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
     await fixture.pairAB.connect(signers.alice).approve(await fixture.router.getAddress(), ethers.MaxUint256);
 
+    const pairAddress = await fixture.pairAB.getAddress();
+    const routerAddress = await fixture.router.getAddress();
+    const encryptedAmountA = await fhevm.createEncryptedInput(pairAddress, routerAddress).add64(Number(ethers.parseEther("20000") / ethers.parseEther("1"))).encrypt();
+    const encryptedAmountB = await fhevm.createEncryptedInput(pairAddress, routerAddress).add64(Number(ethers.parseEther("40000") / ethers.parseEther("1"))).encrypt();
+    
     await fixture.router
       .connect(signers.alice)
       .addLiquidity(
@@ -43,6 +49,12 @@ describe("FHE Complex Scenarios - MEV Sandwich", function () {
         ethers.parseEther("40000"),
         0n,
         0n,
+        {
+          encryptedAmountA: encryptedAmountA.handles[0],
+          encryptedAmountB: encryptedAmountB.handles[0],
+          amountAProof: encryptedAmountA.inputProof,
+          amountBProof: encryptedAmountB.inputProof,
+        },
         signers.alice.address,
         deadline,
       );
@@ -51,18 +63,18 @@ describe("FHE Complex Scenarios - MEV Sandwich", function () {
     const path = [await fixture.tokenA.getAddress(), await fixture.tokenB.getAddress()];
 
     // Create encrypted input for swap using router address
-    const routerAddress = await fixture.router.getAddress();
-    const encryptedSwapAmount = await fhevm
-      .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-      .add32(Number(largeSwapAmount / ethers.parseEther("1")))
-      .encrypt();
+    const swapParams = await createEncryptedSwapParams(
+      await fixture.pairAB.getAddress(),
+      routerAddress,
+      Number(largeSwapAmount / ethers.parseEther("1")),
+      0
+    );
 
     await fixture.router.connect(signers.bob).swapExactTokensForTokens(
       largeSwapAmount,
       0n,
       path,
-      [encryptedSwapAmount.handles[0]],
-      [encryptedSwapAmount.inputProof],
+      [swapParams],
       signers.bob.address,
       deadline,
     );
@@ -101,6 +113,11 @@ describe("FHE Complex Scenarios - MEV Sandwich", function () {
 
     const path = [await fixture.tokenA.getAddress(), await fixture.tokenB.getAddress()];
 
+    const pairABAddress = await fixture.pairAB.getAddress();
+    const routerAddress = await fixture.router.getAddress();
+    const encryptedAmountA1 = await fhevm.createEncryptedInput(pairABAddress, routerAddress).add64(Number(ethers.parseEther("10000") / ethers.parseEther("1"))).encrypt();
+    const encryptedAmountB1 = await fhevm.createEncryptedInput(pairABAddress, routerAddress).add64(Number(ethers.parseEther("20000") / ethers.parseEther("1"))).encrypt();
+    
     const tx1 = fixture.router
       .connect(signers.alice)
       .addLiquidity(
@@ -110,10 +127,19 @@ describe("FHE Complex Scenarios - MEV Sandwich", function () {
         ethers.parseEther("20000"),
         0n,
         0n,
+        {
+          encryptedAmountA: encryptedAmountA1.handles[0],
+          encryptedAmountB: encryptedAmountB1.handles[0],
+          amountAProof: encryptedAmountA1.inputProof,
+          amountBProof: encryptedAmountB1.inputProof,
+        },
         signers.alice.address,
         deadline,
       );
 
+    const encryptedAmountA2 = await fhevm.createEncryptedInput(pairABAddress, routerAddress).add64(Number(ethers.parseEther("10000") / ethers.parseEther("1"))).encrypt();
+    const encryptedAmountB2 = await fhevm.createEncryptedInput(pairABAddress, routerAddress).add64(Number(ethers.parseEther("20000") / ethers.parseEther("1"))).encrypt();
+    
     const tx2 = fixture.router
       .connect(signers.charlie)
       .addLiquidity(
@@ -123,6 +149,12 @@ describe("FHE Complex Scenarios - MEV Sandwich", function () {
         ethers.parseEther("20000"),
         0n,
         0n,
+        {
+          encryptedAmountA: encryptedAmountA2.handles[0],
+          encryptedAmountB: encryptedAmountB2.handles[0],
+          amountAProof: encryptedAmountA2.inputProof,
+          amountBProof: encryptedAmountB2.inputProof,
+        },
         signers.charlie.address,
         deadline,
       );
@@ -130,18 +162,18 @@ describe("FHE Complex Scenarios - MEV Sandwich", function () {
     await Promise.all([tx1, tx2]);
 
     // Create encrypted input for swap using router address
-    const routerAddress = await fixture.router.getAddress();
-    const encryptedSwapAmount = await fhevm
-      .createEncryptedInput(await fixture.pairAB.getAddress(), routerAddress)
-      .add32(Number(swapAmount / ethers.parseEther("1")))
-      .encrypt();
+    const swapParams = await createEncryptedSwapParams(
+      await fixture.pairAB.getAddress(),
+      routerAddress,
+      Number(swapAmount / ethers.parseEther("1")),
+      0
+    );
 
     await fixture.router.connect(signers.bob).swapExactTokensForTokens(
       swapAmount,
       0n,
       path,
-      [encryptedSwapAmount.handles[0]],
-      [encryptedSwapAmount.inputProof],
+      [swapParams],
       signers.bob.address,
       deadline,
     );

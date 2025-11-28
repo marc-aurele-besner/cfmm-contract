@@ -74,6 +74,64 @@ export async function deployFHERouterFixture(): Promise<FHERouterFixture> {
   };
 }
 
+/**
+ * Helper function to create EncryptedSwapParams for router tests
+ */
+export async function createEncryptedSwapParams(
+  pairAddress: string,
+  routerAddress: string,
+  amountAScaled: number,
+  amountBScaled: number
+) {
+  const { fhevm } = await import("hardhat");
+  const encryptedAmountAIn = await fhevm
+    .createEncryptedInput(pairAddress, routerAddress)
+    .add64(amountAScaled)
+    .encrypt();
+  const encryptedAmountBIn = await fhevm
+    .createEncryptedInput(pairAddress, routerAddress)
+    .add64(amountBScaled)
+    .encrypt();
+  
+  return {
+    encryptedAmountAIn: encryptedAmountAIn.handles[0],
+    encryptedAmountBIn: encryptedAmountBIn.handles[0],
+    encryptedAmountAOut: encryptedAmountAIn.handles[0], // Not used but required
+    encryptedAmountBOut: encryptedAmountBIn.handles[0], // Not used but required
+    amountAInProof: encryptedAmountAIn.inputProof,
+    amountBInProof: encryptedAmountBIn.inputProof,
+    amountAOutProof: encryptedAmountAIn.inputProof, // Not used but required
+    amountBOutProof: encryptedAmountBIn.inputProof, // Not used but required
+  };
+}
+
+/**
+ * Helper function to create encrypted liquidity parameters
+ */
+export async function createEncryptedLiquidityParams(
+  pairAddress: string,
+  userAddress: string,
+  amountA: bigint,
+  amountB: bigint
+) {
+  const { fhevm } = await import("hardhat");
+  const encryptedAmountA = await fhevm
+    .createEncryptedInput(pairAddress, userAddress)
+    .add64(Number(amountA / ethers.parseEther("1")))
+    .encrypt();
+  const encryptedAmountB = await fhevm
+    .createEncryptedInput(pairAddress, userAddress)
+    .add64(Number(amountB / ethers.parseEther("1")))
+    .encrypt();
+  
+  return {
+    encryptedAmountA: encryptedAmountA.handles[0],
+    encryptedAmountB: encryptedAmountB.handles[0],
+    amountAProof: encryptedAmountA.inputProof,
+    amountBProof: encryptedAmountB.inputProof,
+  };
+}
+
 
 
 
