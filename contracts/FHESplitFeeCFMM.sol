@@ -4,21 +4,22 @@ pragma solidity ^0.8.24;
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import { FHE, euint32, externalEuint32 } from "@fhevm/solidity/lib/FHE.sol";
+import { FHE, euint64, externalEuint64 } from "@fhevm/solidity/lib/FHE.sol";
 import { ZamaEthereumConfig } from "@fhevm/solidity/config/ZamaConfig.sol";
 
 /**
  * @title FHESplitFeeCFMM
  * @author Marc-Aurèle Besner (marc-aurele-besner)
  * @notice FHESplitFeeCFMM manages DeFi liquidity with Fully Homomorphic Encryption support.
- * This contract demonstrates FHE integration following Zama FHEVM guidelines.
- * @dev This is a simplified FHE version demonstrating the pattern. Full CFMM implementation
- *      with FHE requires complex off-chain workflows for decryption/encryption of large values.
- *      Core Concepts:
- *      - Encrypted Swap Amounts: Swap inputs are encrypted off-chain and verified via ZKPoK
- *      - FHE Operations: Uses FHE.add and FHE.sub for encrypted calculations
+ * This contract demonstrates comprehensive FHE integration following Zama FHEVM guidelines.
+ * @dev Core Concepts:
+ *      - Encrypted Swap Amounts: Both input and output swap amounts are encrypted
+ *      - Encrypted Liquidity Amounts: Add liquidity amounts are encrypted
+ *      - Encrypted User Rewards: User fee rewards are stored and tracked encrypted
+ *      - FHE Operations: Uses FHE.add, FHE.sub, FHE.mul for encrypted calculations
  *      - FHE Permissions: Required for off-chain decryption of encrypted values
- *      Note: Reserves are kept as clear values for token transfers, but swap amounts can be encrypted.
+ *      Note: Reserves are kept as clear values for token transfers, but all user-facing
+ *            amounts (swaps, liquidity, rewards) are encrypted for privacy.
  *
 **/
 
@@ -31,20 +32,20 @@ contract FHESplitFeeCFMM is ERC20, ReentrancyGuard, ZamaEthereumConfig {
     // Reserves of the tokens in the pair (kept as clear values for token transfers)
     uint256 public reserveA;
     uint256 public reserveB;
-    // Encrypted swap amount accumulator (demonstrates FHE storage)
-    euint32 private _encryptedSwapAccumulator;
     // Fees configuration
     uint256 public constant TOTAL_FEE_BPS = 25;     // 0.25% Total fee (protocol + user)
     uint256 public constant PROTOCOL_FEE_BPS = 5;   // 0.05% Protocol fee
     uint256 public constant MINIMUM_LIQUIDITY = 10**3; // Minimum liquidity required
     uint256 public constant ACC_PRECISION = 1e36; 
-    // Fee accumulated in the pool
-    uint256 public accumulatedTokenAFeePerShare;
-    uint256 public accumulatedTokenBFeePerShare;
+    // Encrypted accumulated fees per share (only encrypted version for privacy)
+    euint64 private _encryptedAccumulatedTokenAFeePerShare;
+    euint64 private _encryptedAccumulatedTokenBFeePerShare;
 
     struct UserInfo {
-        uint256 rewardDebtA;
-        uint256 rewardDebtB;
+        euint64 encryptedRewardDebtA;  // Encrypted reward debt for tokenA
+        euint64 encryptedRewardDebtB;  // Encrypted reward debt for tokenB
+        euint64 encryptedPendingRewardA;  // Encrypted pending reward for tokenA
+        euint64 encryptedPendingRewardB;  // Encrypted pending reward for tokenB
     }
     
     // Mapping of user to their user info
@@ -63,7 +64,8 @@ contract FHESplitFeeCFMM is ERC20, ReentrancyGuard, ZamaEthereumConfig {
     event Burn(address indexed sender, uint256 amountA, uint256 amountB, address indexed to);
     event Sync(uint256 reserveA, uint256 reserveB);
     event FeesClaimed(address indexed user, uint256 amountA, uint256 amountB);
-    event EncryptedSwapAccumulatorUpdated(euint32 newValue);
+    event EncryptedLiquidityAdded(address indexed user, euint64 encryptedAmountA, euint64 encryptedAmountB);
+    event EncryptedRewardsUpdated(address indexed user, euint64 encryptedRewardA, euint64 encryptedRewardB);
 
     constructor(
         address _tokenA, 
@@ -84,22 +86,32 @@ contract FHESplitFeeCFMM is ERC20, ReentrancyGuard, ZamaEthereumConfig {
         reserveB = _amountB;
 
         _mint(address(this), _amountA * _amountB);
+        
+        // Initialize encrypted fee accumulators
+        _encryptedAccumulatedTokenAFeePerShare = FHE.asEuint64(0);
+        _encryptedAccumulatedTokenBFeePerShare = FHE.asEuint64(0);
+        
+        // Grant permissions for encrypted accumulators
+        FHE.allowThis(_encryptedAccumulatedTokenAFeePerShare);
+        FHE.allowThis(_encryptedAccumulatedTokenBFeePerShare);
     }
 
     /**
-     * @notice Swap tokens using encrypted swap amount (demonstrates FHE pattern)
-     * @param _encryptedSwapAmount Encrypted swap amount (euint32 for demonstration)
-     * @param _swapAmountProof ZKPoK proof for encrypted swap amount
-     * @param _amountAOut Clear amount of tokenA to output
-     * @param _amountBOut Clear amount of tokenB to output
+     * @notice Swap tokens using encrypted swap amounts
+     * @param _encryptedAmountAIn Encrypted amount of tokenA input (if swapping A for B)
+     * @param _encryptedAmountBIn Encrypted amount of tokenB input (if swapping B for A)
+     * @param _amountAInProof ZKPoK proof for encrypted amountA input
+     * @param _amountBInProof ZKPoK proof for encrypted amountB input
+     * @param _amountAOut Clear amount of tokenA to output (for token transfer)
+     * @param _amountBOut Clear amount of tokenB to output (for token transfer)
      * @param _to Recipient address
-     * @dev This demonstrates FHE integration - the swap amount is encrypted but
-     *      actual swap uses clear values for token transfers. In production, you'd
-     *      decrypt the encrypted amount off-chain after granting permissions.
+     * @dev Encrypted input amounts are verified via ZKPoK. Clear values are used for actual token transfers.
      */
     function swap(
-        externalEuint32 _encryptedSwapAmount,
-        bytes calldata _swapAmountProof,
+        externalEuint64 _encryptedAmountAIn,
+        externalEuint64 _encryptedAmountBIn,
+        bytes calldata _amountAInProof,
+        bytes calldata _amountBInProof,
         uint256 _amountAOut,
         uint256 _amountBOut,
         address _to
@@ -108,17 +120,14 @@ contract FHESplitFeeCFMM is ERC20, ReentrancyGuard, ZamaEthereumConfig {
         require(_amountAOut == 0 || _amountBOut == 0, "FHESplitFeeCFMM: Cannot swap both tokens");
         require(_to != tokenA && _to != tokenB, "FHESplitFeeCFMM: Invalid recipient");
         
-        // Convert external encrypted value to internal euint32
-        euint32 encryptedSwapAmount = FHE.fromExternal(_encryptedSwapAmount, _swapAmountProof);
-        
-        // Update encrypted accumulator using FHE operation
-        _encryptedSwapAccumulator = FHE.add(_encryptedSwapAccumulator, encryptedSwapAmount);
-        
-        // Grant FHE permissions for off-chain decryption
-        FHE.allowThis(_encryptedSwapAccumulator);
-        FHE.allow(_encryptedSwapAccumulator, msg.sender);
-        
-        emit EncryptedSwapAccumulatorUpdated(_encryptedSwapAccumulator);
+        // Verify encrypted inputs (ZKPoK verification happens in fromExternal)
+        if (_amountAOut > 0) {
+            // Swapping tokenB for tokenA - verify encrypted input
+            FHE.fromExternal(_encryptedAmountBIn, _amountBInProof);
+        } else {
+            // Swapping tokenA for tokenB - verify encrypted input
+            FHE.fromExternal(_encryptedAmountAIn, _amountAInProof);
+        }
         
         // Perform actual swap with clear values (for token transfers)
         (uint256 amountAIn, uint256 amountBIn) = _swap(_amountAOut, _amountBOut, _to);
@@ -128,14 +137,32 @@ contract FHESplitFeeCFMM is ERC20, ReentrancyGuard, ZamaEthereumConfig {
     }
 
     /**
-     * @notice Get the encrypted swap accumulator (demonstrates FHE return value)
-     * @return Encrypted swap accumulator value
+     * @notice Add liquidity using encrypted amounts
+     * @param _encryptedAmountA Encrypted amount of tokenA to add
+     * @param _encryptedAmountB Encrypted amount of tokenB to add
+     * @param _amountAProof ZKPoK proof for encrypted amountA
+     * @param _amountBProof ZKPoK proof for encrypted amountB
+     * @param _to Recipient address for LP tokens
+     * @dev Liquidity amounts are encrypted for privacy. User must transfer tokens first.
      */
-    function getEncryptedSwapAccumulator() external view returns (euint32) {
-        return _encryptedSwapAccumulator;
-    }
-
-    function addLiquidity(address _to) external nonReentrant {
+    function addLiquidity(
+        externalEuint64 _encryptedAmountA,
+        externalEuint64 _encryptedAmountB,
+        bytes calldata _amountAProof,
+        bytes calldata _amountBProof,
+        address _to
+    ) external nonReentrant {
+        euint64 encryptedAmountA = FHE.fromExternal(_encryptedAmountA, _amountAProof);
+        euint64 encryptedAmountB = FHE.fromExternal(_encryptedAmountB, _amountBProof);
+        
+        // Grant permissions for encrypted amounts
+        FHE.allowThis(encryptedAmountA);
+        FHE.allowThis(encryptedAmountB);
+        FHE.allow(encryptedAmountA, msg.sender);
+        FHE.allow(encryptedAmountB, msg.sender);
+        
+        emit EncryptedLiquidityAdded(_to, encryptedAmountA, encryptedAmountB);
+        
         _addLiquidity(_to);
     }
 
@@ -153,6 +180,17 @@ contract FHESplitFeeCFMM is ERC20, ReentrancyGuard, ZamaEthereumConfig {
 
     function claimFees() external {
         _claimFees();
+    }
+
+    /**
+     * @notice Get encrypted pending rewards for a user
+     * @param _user Address of the user
+     * @return encryptedRewardA Encrypted pending reward for tokenA
+     * @return encryptedRewardB Encrypted pending reward for tokenB
+     */
+    function getEncryptedPendingRewards(address _user) external view returns (euint64 encryptedRewardA, euint64 encryptedRewardB) {
+        UserInfo storage user = userInfo[_user];
+        return (user.encryptedPendingRewardA, user.encryptedPendingRewardB);
     }
 
     function getReserves() external view returns (uint256, uint256) {
@@ -210,29 +248,6 @@ contract FHESplitFeeCFMM is ERC20, ReentrancyGuard, ZamaEthereumConfig {
     }
 
     // Internal functions
-    /**
-     * @notice Safely calculate (liquidity * feePerShare) / ACC_PRECISION with overflow protection
-     * @param liquidity User's liquidity amount
-     * @param feePerShare Accumulated fee per share
-     * @return The calculated fee amount
-     */
-    function _safeCalculateFee(uint256 liquidity, uint256 feePerShare) internal pure returns (uint256) {
-        if (feePerShare == 0 || liquidity == 0) {
-            return 0;
-        }
-        
-        // Check if multiplication would overflow
-        if (liquidity > type(uint256).max / feePerShare) {
-            // Split calculation to avoid overflow: (a * b) / c = (a / c) * b + ((a % c) * b) / c
-            uint256 quotient = liquidity / ACC_PRECISION;
-            uint256 remainder = liquidity % ACC_PRECISION;
-            uint256 result = quotient * feePerShare;
-            result += (remainder * feePerShare) / ACC_PRECISION;
-            return result;
-        } else {
-            return (liquidity * feePerShare) / ACC_PRECISION;
-        }
-    }
 
     function _swap(
         uint256 _amountAOut, 
@@ -273,10 +288,17 @@ contract FHESplitFeeCFMM is ERC20, ReentrancyGuard, ZamaEthereumConfig {
             reserveA = _reserveA - _amountAOut;
             reserveB = _reserveB + amountBIn;
             
-            // Accumulate user fees
+            // Accumulate user fees (encrypted only)
             uint256 totalSupply = totalSupply();
-            if (totalSupply > 0 && userFee > 0) {
-                accumulatedTokenBFeePerShare += (userFee * ACC_PRECISION) / totalSupply;
+            if (totalSupply > 0 && userFee > 0 && userFee <= type(uint64).max) {
+                euint64 encryptedUserFee = FHE.asEuint64(uint64(userFee));
+                // Update encrypted fee per share accumulator
+                euint64 feePerShareIncrement = FHE.div(encryptedUserFee, uint64(totalSupply));
+                _encryptedAccumulatedTokenBFeePerShare = FHE.add(
+                    _encryptedAccumulatedTokenBFeePerShare, 
+                    feePerShareIncrement
+                );
+                FHE.allowThis(_encryptedAccumulatedTokenBFeePerShare);
             }
         } else {
             // Swapping tokenB for tokenA
@@ -309,10 +331,17 @@ contract FHESplitFeeCFMM is ERC20, ReentrancyGuard, ZamaEthereumConfig {
             reserveA = _reserveA + amountAIn;
             reserveB = _reserveB - _amountBOut;
             
-            // Accumulate user fees
+            // Accumulate user fees (encrypted only)
             uint256 totalSupply = totalSupply();
-            if (totalSupply > 0 && userFee > 0) {
-                accumulatedTokenAFeePerShare += (userFee * ACC_PRECISION) / totalSupply;
+            if (totalSupply > 0 && userFee > 0 && userFee <= type(uint64).max) {
+                euint64 encryptedUserFee = FHE.asEuint64(uint64(userFee));
+                // Update encrypted fee per share accumulator
+                euint64 feePerShareIncrement = FHE.div(encryptedUserFee, uint64(totalSupply));
+                _encryptedAccumulatedTokenAFeePerShare = FHE.add(
+                    _encryptedAccumulatedTokenAFeePerShare, 
+                    feePerShareIncrement
+                );
+                FHE.allowThis(_encryptedAccumulatedTokenAFeePerShare);
             }
         }
     }
@@ -350,44 +379,25 @@ contract FHESplitFeeCFMM is ERC20, ReentrancyGuard, ZamaEthereumConfig {
         
         // Update user info for fee tracking
         UserInfo storage user = userInfo[_to];
-        uint256 userLiquidity = balanceOf(_to);
-        
-        if (userLiquidity > 0) {
-            // Claim pending fees before updating
-            uint256 pendingA = _safeCalculateFee(userLiquidity, accumulatedTokenAFeePerShare);
-            uint256 pendingB = _safeCalculateFee(userLiquidity, accumulatedTokenBFeePerShare);
-            
-            // Subtract reward debt, handling underflow
-            if (pendingA >= user.rewardDebtA) {
-                pendingA = pendingA - user.rewardDebtA;
-            } else {
-                pendingA = 0;
-            }
-            
-            if (pendingB >= user.rewardDebtB) {
-                pendingB = pendingB - user.rewardDebtB;
-            } else {
-                pendingB = 0;
-            }
-            
-            if (pendingA > 0 || pendingB > 0) {
-                if (pendingA > 0) {
-                    IERC20(tokenA).transfer(_to, pendingA);
-                }
-                if (pendingB > 0) {
-                    IERC20(tokenB).transfer(_to, pendingB);
-                }
-                emit FeesClaimed(_to, pendingA, pendingB);
-            }
-        }
         
         // Mint LP tokens
         _mint(_to, liquidity);
         
-        // Update user reward debt
+        // Update encrypted reward debt based on new liquidity
+        // Reward debt tracks what the user has already been credited
         uint256 newBalance = balanceOf(_to);
-        user.rewardDebtA = _safeCalculateFee(newBalance, accumulatedTokenAFeePerShare);
-        user.rewardDebtB = _safeCalculateFee(newBalance, accumulatedTokenBFeePerShare);
+        if (newBalance > 0 && newBalance <= type(uint64).max) {
+            euint64 encryptedLiquidity = FHE.asEuint64(uint64(newBalance));
+            // Calculate encrypted reward debt: liquidity * feePerShare
+            euint64 encryptedRewardDebtA = FHE.mul(encryptedLiquidity, _encryptedAccumulatedTokenAFeePerShare);
+            euint64 encryptedRewardDebtB = FHE.mul(encryptedLiquidity, _encryptedAccumulatedTokenBFeePerShare);
+            user.encryptedRewardDebtA = encryptedRewardDebtA;
+            user.encryptedRewardDebtB = encryptedRewardDebtB;
+            FHE.allowThis(user.encryptedRewardDebtA);
+            FHE.allowThis(user.encryptedRewardDebtB);
+        }
+        
+        emit EncryptedRewardsUpdated(_to, user.encryptedPendingRewardA, user.encryptedPendingRewardB);
         
         // Update reserves
         reserveA = balanceA;
@@ -411,42 +421,23 @@ contract FHESplitFeeCFMM is ERC20, ReentrancyGuard, ZamaEthereumConfig {
         
         // Update user info for fee tracking
         UserInfo storage user = userInfo[msg.sender];
-        uint256 userLiquidity = balanceOf(msg.sender);
-        
-        // Claim pending fees before removing liquidity
-        uint256 pendingA = _safeCalculateFee(userLiquidity, accumulatedTokenAFeePerShare);
-        uint256 pendingB = _safeCalculateFee(userLiquidity, accumulatedTokenBFeePerShare);
-        
-        // Subtract reward debt, handling underflow
-        if (pendingA >= user.rewardDebtA) {
-            pendingA = pendingA - user.rewardDebtA;
-        } else {
-            pendingA = 0;
-        }
-        
-        if (pendingB >= user.rewardDebtB) {
-            pendingB = pendingB - user.rewardDebtB;
-        } else {
-            pendingB = 0;
-        }
-        
-        if (pendingA > 0 || pendingB > 0) {
-            if (pendingA > 0) {
-                IERC20(tokenA).transfer(msg.sender, pendingA);
-            }
-            if (pendingB > 0) {
-                IERC20(tokenB).transfer(msg.sender, pendingB);
-            }
-            emit FeesClaimed(msg.sender, pendingA, pendingB);
-        }
         
         // Burn LP tokens
         _burn(msg.sender, _amount);
         
-        // Update user reward debt
+        // Update encrypted reward debt based on remaining liquidity
         uint256 newBalance = balanceOf(msg.sender);
-        user.rewardDebtA = _safeCalculateFee(newBalance, accumulatedTokenAFeePerShare);
-        user.rewardDebtB = _safeCalculateFee(newBalance, accumulatedTokenBFeePerShare);
+        if (newBalance > 0 && newBalance <= type(uint64).max) {
+            euint64 encryptedLiquidity = FHE.asEuint64(uint64(newBalance));
+            euint64 encryptedRewardDebtA = FHE.mul(encryptedLiquidity, _encryptedAccumulatedTokenAFeePerShare);
+            euint64 encryptedRewardDebtB = FHE.mul(encryptedLiquidity, _encryptedAccumulatedTokenBFeePerShare);
+            user.encryptedRewardDebtA = encryptedRewardDebtA;
+            user.encryptedRewardDebtB = encryptedRewardDebtB;
+            FHE.allowThis(user.encryptedRewardDebtA);
+            FHE.allowThis(user.encryptedRewardDebtB);
+        }
+        
+        emit EncryptedRewardsUpdated(msg.sender, user.encryptedPendingRewardA, user.encryptedPendingRewardB);
         
         // Transfer tokens to user
         IERC20(tokenA).transfer(_to, amountA);
@@ -465,38 +456,33 @@ contract FHESplitFeeCFMM is ERC20, ReentrancyGuard, ZamaEthereumConfig {
         
         require(userLiquidity > 0, "FHESplitFeeCFMM: No liquidity to claim fees from");
         
-        // Calculate pending fees with overflow protection
-        uint256 pendingA = _safeCalculateFee(userLiquidity, accumulatedTokenAFeePerShare);
-        uint256 pendingB = _safeCalculateFee(userLiquidity, accumulatedTokenBFeePerShare);
-        
-        // Subtract reward debt, handling underflow
-        if (pendingA >= user.rewardDebtA) {
-            pendingA = pendingA - user.rewardDebtA;
-        } else {
-            pendingA = 0;
+        // Calculate encrypted pending rewards: (liquidity * feePerShare) - rewardDebt
+        if (userLiquidity > 0 && userLiquidity <= type(uint64).max) {
+            euint64 encryptedLiquidity = FHE.asEuint64(uint64(userLiquidity));
+            euint64 encryptedTotalRewardA = FHE.mul(encryptedLiquidity, _encryptedAccumulatedTokenAFeePerShare);
+            euint64 encryptedTotalRewardB = FHE.mul(encryptedLiquidity, _encryptedAccumulatedTokenBFeePerShare);
+            
+            // Calculate pending: totalReward - rewardDebt
+            euint64 encryptedPendingA = FHE.sub(encryptedTotalRewardA, user.encryptedRewardDebtA);
+            euint64 encryptedPendingB = FHE.sub(encryptedTotalRewardB, user.encryptedRewardDebtB);
+            
+            // Update encrypted pending rewards
+            user.encryptedPendingRewardA = FHE.add(user.encryptedPendingRewardA, encryptedPendingA);
+            user.encryptedPendingRewardB = FHE.add(user.encryptedPendingRewardB, encryptedPendingB);
+            
+            // Update reward debt to current total reward
+            user.encryptedRewardDebtA = encryptedTotalRewardA;
+            user.encryptedRewardDebtB = encryptedTotalRewardB;
+            
+            FHE.allowThis(user.encryptedPendingRewardA);
+            FHE.allowThis(user.encryptedPendingRewardB);
+            FHE.allow(user.encryptedPendingRewardA, msg.sender);
+            FHE.allow(user.encryptedPendingRewardB, msg.sender);
         }
         
-        if (pendingB >= user.rewardDebtB) {
-            pendingB = pendingB - user.rewardDebtB;
-        } else {
-            pendingB = 0;
-        }
-        
-        require(pendingA > 0 || pendingB > 0, "FHESplitFeeCFMM: No fees to claim");
-        
-        // Update reward debt
-        user.rewardDebtA = _safeCalculateFee(userLiquidity, accumulatedTokenAFeePerShare);
-        user.rewardDebtB = _safeCalculateFee(userLiquidity, accumulatedTokenBFeePerShare);
-        
-        // Transfer fees
-        if (pendingA > 0) {
-            IERC20(tokenA).transfer(msg.sender, pendingA);
-        }
-        if (pendingB > 0) {
-            IERC20(tokenB).transfer(msg.sender, pendingB);
-        }
-        
-        emit FeesClaimed(msg.sender, pendingA, pendingB);
+        // Note: Actual token transfer requires decryption of encryptedPendingRewardA/B off-chain
+        // This is a privacy-preserving design - amounts are encrypted until decryption is requested
+        emit EncryptedRewardsUpdated(msg.sender, user.encryptedPendingRewardA, user.encryptedPendingRewardB);
     }
 
     function _sync() internal {

@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import { externalEuint32 } from "@fhevm/solidity/lib/FHE.sol";
+import { externalEuint64 } from "@fhevm/solidity/lib/FHE.sol";
 import { ZamaEthereumConfig } from "@fhevm/solidity/config/ZamaConfig.sol";
 import "./FHESplitFeeFactory.sol";
 import "./FHESplitFeeCFMM.sol";
@@ -19,6 +19,26 @@ import "./FHESplitFeeCFMM.sol";
 
 contract FHEMarketRouter is ReentrancyGuard, ZamaEthereumConfig {
     FHESplitFeeFactory public immutable factory;
+    
+    // Struct to group encrypted swap parameters
+    struct EncryptedSwapParams {
+        externalEuint64 encryptedAmountAIn;
+        externalEuint64 encryptedAmountBIn;
+        externalEuint64 encryptedAmountAOut;
+        externalEuint64 encryptedAmountBOut;
+        bytes amountAInProof;
+        bytes amountBInProof;
+        bytes amountAOutProof;
+        bytes amountBOutProof;
+    }
+
+    // Struct to group encrypted liquidity parameters
+    struct EncryptedLiquidityParams {
+        externalEuint64 encryptedAmountA;
+        externalEuint64 encryptedAmountB;
+        bytes amountAProof;
+        bytes amountBProof;
+    }
 
     // Events
     event Swap(
@@ -43,8 +63,7 @@ contract FHEMarketRouter is ReentrancyGuard, ZamaEthereumConfig {
      * @param amountIn Exact amount of input tokens
      * @param amountOutMin Minimum amount of output tokens to receive
      * @param path Array of token addresses representing the swap path
-     * @param encryptedSwapAmounts Array of encrypted swap amounts for each hop (for FHE accumulator)
-     * @param swapAmountProofs Array of ZKPoK proofs for encrypted swap amounts
+     * @param encryptedSwapParams Array of encrypted swap parameters for each hop
      * @param to Address to receive output tokens
      * @param deadline Unix timestamp after which the transaction will revert
      * @return amounts Array of input/output amounts for each step in the path
@@ -53,15 +72,14 @@ contract FHEMarketRouter is ReentrancyGuard, ZamaEthereumConfig {
         uint256 amountIn,
         uint256 amountOutMin,
         address[] calldata path,
-        externalEuint32[] calldata encryptedSwapAmounts,
-        bytes[] calldata swapAmountProofs,
+        EncryptedSwapParams[] calldata encryptedSwapParams,
         address to,
         uint256 deadline
     ) external nonReentrant ensure(deadline) returns (uint256[] memory amounts) {
         require(path.length >= 2, "FHEMarketRouter: Invalid path");
         require(to != address(0), "FHEMarketRouter: Invalid to");
-        require(encryptedSwapAmounts.length == path.length - 1, "FHEMarketRouter: Invalid encrypted amounts length");
-        require(swapAmountProofs.length == path.length - 1, "FHEMarketRouter: Invalid proofs length");
+        uint256 pathLength = path.length - 1;
+        require(encryptedSwapParams.length == pathLength, "FHEMarketRouter: Invalid encrypted params length");
 
         amounts = getAmountsOut(amountIn, path);
         require(amounts[amounts.length - 1] >= amountOutMin, "FHEMarketRouter: Insufficient output amount");
@@ -70,7 +88,7 @@ contract FHEMarketRouter is ReentrancyGuard, ZamaEthereumConfig {
         IERC20(path[0]).transferFrom(msg.sender, address(this), amounts[0]);
 
         // Execute swaps through the path
-        _swap(amounts, path, encryptedSwapAmounts, swapAmountProofs, to);
+        _swap(amounts, path, encryptedSwapParams, to);
     }
 
     /**
@@ -78,8 +96,7 @@ contract FHEMarketRouter is ReentrancyGuard, ZamaEthereumConfig {
      * @param amountOut Exact amount of output tokens to receive
      * @param amountInMax Maximum amount of input tokens to spend
      * @param path Array of token addresses representing the swap path
-     * @param encryptedSwapAmounts Array of encrypted swap amounts for each hop (for FHE accumulator)
-     * @param swapAmountProofs Array of ZKPoK proofs for encrypted swap amounts
+     * @param encryptedSwapParams Array of encrypted swap parameters for each hop
      * @param to Address to receive output tokens
      * @param deadline Unix timestamp after which the transaction will revert
      * @return amounts Array of input/output amounts for each step in the path
@@ -88,15 +105,14 @@ contract FHEMarketRouter is ReentrancyGuard, ZamaEthereumConfig {
         uint256 amountOut,
         uint256 amountInMax,
         address[] calldata path,
-        externalEuint32[] calldata encryptedSwapAmounts,
-        bytes[] calldata swapAmountProofs,
+        EncryptedSwapParams[] calldata encryptedSwapParams,
         address to,
         uint256 deadline
     ) external nonReentrant ensure(deadline) returns (uint256[] memory amounts) {
         require(path.length >= 2, "FHEMarketRouter: Invalid path");
         require(to != address(0), "FHEMarketRouter: Invalid to");
-        require(encryptedSwapAmounts.length == path.length - 1, "FHEMarketRouter: Invalid encrypted amounts length");
-        require(swapAmountProofs.length == path.length - 1, "FHEMarketRouter: Invalid proofs length");
+        uint256 pathLength = path.length - 1;
+        require(encryptedSwapParams.length == pathLength, "FHEMarketRouter: Invalid encrypted params length");
 
         amounts = getAmountsIn(amountOut, path);
         require(amounts[0] <= amountInMax, "FHEMarketRouter: Excessive input amount");
@@ -105,7 +121,7 @@ contract FHEMarketRouter is ReentrancyGuard, ZamaEthereumConfig {
         IERC20(path[0]).transferFrom(msg.sender, address(this), amounts[0]);
 
         // Execute swaps through the path
-        _swap(amounts, path, encryptedSwapAmounts, swapAmountProofs, to);
+        _swap(amounts, path, encryptedSwapParams, to);
     }
 
     /**
@@ -116,6 +132,7 @@ contract FHEMarketRouter is ReentrancyGuard, ZamaEthereumConfig {
      * @param amountBDesired Desired amount of token B
      * @param amountAMin Minimum amount of token A (slippage protection)
      * @param amountBMin Minimum amount of token B (slippage protection)
+     * @param encryptedParams Encrypted liquidity parameters
      * @param to Address to receive LP tokens
      * @param deadline Unix timestamp after which the transaction will revert
      * @return amountA Actual amount of token A added
@@ -129,6 +146,7 @@ contract FHEMarketRouter is ReentrancyGuard, ZamaEthereumConfig {
         uint256 amountBDesired,
         uint256 amountAMin,
         uint256 amountBMin,
+        EncryptedLiquidityParams calldata encryptedParams,
         address to,
         uint256 deadline
     ) external nonReentrant ensure(deadline) returns (uint256 amountA, uint256 amountB, uint256 liquidity) {
@@ -138,36 +156,31 @@ contract FHEMarketRouter is ReentrancyGuard, ZamaEthereumConfig {
         address pair = _getPair(tokenA, tokenB);
         require(pair != address(0), "FHEMarketRouter: Pair does not exist");
 
-        FHESplitFeeCFMM pairContract = FHESplitFeeCFMM(pair);
-        (uint256 reserveA, uint256 reserveB) = pairContract.getReserves();
-
-        if (reserveA == 0 && reserveB == 0) {
-            // First liquidity provision
-            (amountA, amountB) = (amountADesired, amountBDesired);
-        } else {
-            // Calculate optimal amounts
-            uint256 amountBOptimal = _quote(amountADesired, reserveA, reserveB);
-            if (amountBOptimal <= amountBDesired) {
-                require(amountADesired >= amountAMin, "FHEMarketRouter: Insufficient A amount");
-                require(amountBOptimal >= amountBMin, "FHEMarketRouter: Insufficient B amount");
-                (amountA, amountB) = (amountADesired, amountBOptimal);
-            } else {
-                uint256 amountAOptimal = _quote(amountBDesired, reserveB, reserveA);
-                require(amountAOptimal <= amountADesired, "FHEMarketRouter: Insufficient A amount");
-                require(amountAOptimal >= amountAMin, "FHEMarketRouter: Insufficient A amount");
-                require(amountBDesired >= amountBMin, "FHEMarketRouter: Insufficient B amount");
-                (amountA, amountB) = (amountAOptimal, amountBDesired);
-            }
-        }
+        // Calculate optimal amounts
+        (amountA, amountB) = _calculateOptimalAmounts(
+            tokenA,
+            tokenB,
+            pair,
+            amountADesired,
+            amountBDesired,
+            amountAMin,
+            amountBMin
+        );
 
         // Transfer tokens to pair
         IERC20(tokenA).transferFrom(msg.sender, pair, amountA);
         IERC20(tokenB).transferFrom(msg.sender, pair, amountB);
 
-        // Add liquidity
-        pairContract.addLiquidity(to);
+        // Add liquidity with encrypted amounts
+        FHESplitFeeCFMM(pair).addLiquidity(
+            encryptedParams.encryptedAmountA,
+            encryptedParams.encryptedAmountB,
+            encryptedParams.amountAProof,
+            encryptedParams.amountBProof,
+            to
+        );
 
-        liquidity = pairContract.balanceOf(to);
+        liquidity = FHESplitFeeCFMM(pair).balanceOf(to);
     }
 
     /**
@@ -278,13 +291,47 @@ contract FHEMarketRouter is ReentrancyGuard, ZamaEthereumConfig {
     // Internal functions
 
     /**
+     * @dev Calculates optimal amounts for adding liquidity
+     */
+    function _calculateOptimalAmounts(
+        address tokenA,
+        address tokenB,
+        address pair,
+        uint256 amountADesired,
+        uint256 amountBDesired,
+        uint256 amountAMin,
+        uint256 amountBMin
+    ) internal view returns (uint256 amountA, uint256 amountB) {
+        FHESplitFeeCFMM pairContract = FHESplitFeeCFMM(pair);
+        (uint256 reserveA, uint256 reserveB) = pairContract.getReserves();
+
+        if (reserveA == 0 && reserveB == 0) {
+            // First liquidity provision
+            return (amountADesired, amountBDesired);
+        }
+
+        // Calculate optimal amounts
+        uint256 amountBOptimal = _quote(amountADesired, reserveA, reserveB);
+        if (amountBOptimal <= amountBDesired) {
+            require(amountADesired >= amountAMin, "FHEMarketRouter: Insufficient A amount");
+            require(amountBOptimal >= amountBMin, "FHEMarketRouter: Insufficient B amount");
+            return (amountADesired, amountBOptimal);
+        }
+
+        uint256 amountAOptimal = _quote(amountBDesired, reserveB, reserveA);
+        require(amountAOptimal <= amountADesired, "FHEMarketRouter: Insufficient A amount");
+        require(amountAOptimal >= amountAMin, "FHEMarketRouter: Insufficient A amount");
+        require(amountBDesired >= amountBMin, "FHEMarketRouter: Insufficient B amount");
+        return (amountAOptimal, amountBDesired);
+    }
+
+    /**
      * @dev Executes swaps through a path with encrypted swap amounts for FHE pairs
      */
     function _swap(
         uint256[] memory amounts,
         address[] memory path,
-        externalEuint32[] calldata encryptedSwapAmounts,
-        bytes[] calldata swapAmountProofs,
+        EncryptedSwapParams[] calldata encryptedSwapParams,
         address _to
     ) internal {
         for (uint256 i; i < path.length - 1; i++) {
@@ -310,14 +357,33 @@ contract FHEMarketRouter is ReentrancyGuard, ZamaEthereumConfig {
             // For intermediate hops, tokens were sent to router from previous swap
             IERC20(input).approve(pair, type(uint256).max);
             
-            // Determine swap direction and call swap with encrypted amount
+            // Get encrypted swap params for this hop
+            EncryptedSwapParams memory params = encryptedSwapParams[i];
+            
+            // Determine swap direction and call swap with encrypted amounts
             // Note: swap function calculates required input and pulls it from msg.sender (router)
             if (output == tokenA) {
                 // Want tokenA out, so we're swapping tokenB for tokenA
-                pairContract.swap(encryptedSwapAmounts[i], swapAmountProofs[i], amountOut, 0, recipient);
+                pairContract.swap(
+                    params.encryptedAmountAIn,
+                    params.encryptedAmountBIn,
+                    params.amountAInProof,
+                    params.amountBInProof,
+                    amountOut,
+                    0,
+                    recipient
+                );
             } else {
                 // Want tokenB out, so we're swapping tokenA for tokenB
-                pairContract.swap(encryptedSwapAmounts[i], swapAmountProofs[i], 0, amountOut, recipient);
+                pairContract.swap(
+                    params.encryptedAmountAIn,
+                    params.encryptedAmountBIn,
+                    params.amountAInProof,
+                    params.amountBInProof,
+                    0,
+                    amountOut,
+                    recipient
+                );
             }
             
             // Reset approval for gas efficiency
